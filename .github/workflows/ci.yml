@@ -61,14 +61,11 @@ jobs:
     - name: Install tarpaulin
       run: cargo install cargo-tarpaulin
     
-    - name: Generate coverage
-      run: cargo tarpaulin --out Xml
+    - name: Generate coverage report
+      run: cargo tarpaulin --out Html
     
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./cobertura.xml
-        fail_ci_if_error: true
+    - name: Display coverage summary
+      run: cargo tarpaulin --out Stdout
 
   license-check:
     name: License Check
