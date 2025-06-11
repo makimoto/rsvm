@@ -1,0 +1,50 @@
+[package]
+name = "rsvm"
+version = "0.1.0"
+edition = "2021"
+authors = ["rsvm contributors"]
+description = "A pure Rust implementation of Support Vector Machine"
+repository = "https://github.com/yourusername/rsvm"
+license = "MIT OR BSD-3-Clause"
+keywords = ["svm", "machine-learning", "classification"]
+categories = ["science", "algorithms"]
+
+[dependencies]
+# Linear algebra - MIT/Apache-2.0
+ndarray = { version = "0.15", features = ["rayon"] }
+
+# Parallelization - MIT/Apache-2.0
+rayon = "1.7"
+
+# Caching - MIT/Apache-2.0
+lru = "0.12"
+
+# Numeric traits - MIT/Apache-2.0
+num-traits = "0.2"
+
+# Error handling - MIT/Apache-2.0
+thiserror = "1.0"
+
+# Logging facade - MIT/Apache-2.0
+log = "0.4"
+
+# Optional: Serialization - MIT/Apache-2.0
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+[dev-dependencies]
+# Test logging - MIT/Apache-2.0
+env_logger = "0.10"
+
+# Float comparison - Apache-2.0
+approx = "0.5"
+
+# Benchmarking - MIT/Apache-2.0
+criterion = "0.5"
+
+[features]
+default = []
+serde_support = ["serde"]
+
+[[bench]]
+name = "kernel_benchmark"
+harness = false

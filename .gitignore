@@ -1,0 +1,30 @@
+# Rust
+target/
+Cargo.lock
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test data
+*.dat
+*.txt
+!examples/*.txt
+
+# Profiling
+perf.data
+perf.data.old
+flamegraph.svg
+
+# Coverage
+tarpaulin-report.html
+cobertura.xml
+lcov.info
