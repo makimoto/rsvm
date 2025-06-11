@@ -84,6 +84,7 @@ cargo tarpaulin --out Html
 ## 現在の実装状況
 - [x] プロジェクト基本構造
 - [x] Cargo.toml 作成
+- [x] GitHub Actions CI/CD 設定
 - [ ] コアタイプとトレイト
 - [ ] 線形カーネル
 - [ ] SMO ソルバー
@@ -91,6 +92,12 @@ cargo tarpaulin --out Html
 - [ ] 最適化器
 - [ ] メインAPI
 - [ ] テスト
+
+## 開発ログ
+### 2025-01-06
+- プロジェクト初期化完了
+- GitHub Actions設定作成（マルチプラットフォーム対応、ライセンスチェック含む）
+- 明示的なファイル指定でのgit add使用（`git add -A`は避ける）
 
 ## 注意事項
 - 過度な仮定を避け、不明な点は確認する
