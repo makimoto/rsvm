@@ -103,4 +103,17 @@ mod tests {
         assert_eq!(dot_product_sparse(&x, &y), 0.0);
         assert_eq!(dot_product_sparse(&y, &x), 0.0);
     }
+    
+    #[test]
+    fn test_linear_kernel_with_norms() {
+        let kernel = LinearKernel::new();
+        let x = SparseVector::new(vec![0, 1], vec![3.0, 4.0]);
+        let y = SparseVector::new(vec![0, 1], vec![1.0, 2.0]);
+        
+        // Test that compute_with_norms gives same result as compute
+        let result1 = kernel.compute(&x, &y);
+        let result2 = kernel.compute_with_norms(&x, &y, 25.0, 5.0);
+        assert_eq!(result1, result2);
+        assert_eq!(result1, 11.0); // 3*1 + 4*2 = 11
+    }
 }
