@@ -1,3 +1,8 @@
 //! Data loading and dataset implementations
+//!
+//! This module provides implementations of the Dataset trait for various
+//! data formats commonly used in machine learning.
 
-// TODO: Implement dataset support
+pub mod libsvm;
+
+pub use self::libsvm::*;
