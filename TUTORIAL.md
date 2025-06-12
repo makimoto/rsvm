@@ -6,13 +6,14 @@ This tutorial provides a step-by-step guide to using the RSVM (Rust Support Vect
 
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
-3. [Working with Data Formats](#working-with-data-formats)
-4. [Training Your First Model](#training-your-first-model)
-5. [Model Evaluation](#model-evaluation)
-6. [Advanced Configuration](#advanced-configuration)
-7. [Real-World Example](#real-world-example)
-8. [Performance Tips](#performance-tips)
-9. [Troubleshooting](#troubleshooting)
+3. [CLI Usage](#cli-usage)
+4. [Working with Data Formats](#working-with-data-formats)
+5. [Training Your First Model](#training-your-first-model)
+6. [Model Evaluation](#model-evaluation)
+7. [Advanced Configuration](#advanced-configuration)
+8. [Real-World Example](#real-world-example)
+9. [Performance Tips](#performance-tips)
+10. [Troubleshooting](#troubleshooting)
 
 ## Installation
 
@@ -38,6 +39,12 @@ cd rsvm
 cargo build --release
 ```
 
+To build the CLI binary:
+
+```bash
+cargo build --bin rsvm --release
+```
+
 ### Verify Installation
 
 ```bash
@@ -45,6 +52,12 @@ cargo test
 ```
 
 All tests should pass, confirming the installation is successful.
+
+Verify CLI functionality:
+
+```bash
+./target/release/rsvm --help
+```
 
 ## Quick Start
 
@@ -78,6 +91,120 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+## CLI Usage
+
+RSVM includes a comprehensive command-line interface for easy model training, prediction, and evaluation without writing code.
+
+### Basic CLI Commands
+
+```bash
+# Show help
+rsvm --help
+
+# Show help for specific commands
+rsvm train --help
+rsvm predict --help
+rsvm evaluate --help
+rsvm info --help
+```
+
+### Model Training
+
+```bash
+# Basic training (LibSVM format)
+rsvm train --data training_data.libsvm --output my_model.json
+
+# Training with CSV data
+rsvm train --data training_data.csv --output my_model.json --format csv
+
+# Training with custom parameters
+rsvm train --data training_data.libsvm --output my_model.json \
+    -C 10.0 --epsilon 0.0001 --max-iterations 2000
+
+# Verbose training output
+rsvm train --data training_data.libsvm --output my_model.json --verbose
+```
+
+### Model Information
+
+```bash
+# Display detailed model information
+rsvm info my_model.json
+```
+
+Example output:
+```
+=== SVM Model Summary ===
+Kernel Type: linear
+Support Vectors: 23
+Bias: 0.123456
+Library Version: 0.1.0
+Created: 2025-06-12T10:30:00+00:00
+Training Parameters:
+  C: 1
+  Epsilon: 0.001
+  Max Iterations: 1000
+```
+
+### Quick Operations
+
+```bash
+# Train/test split evaluation
+rsvm quick eval training_data.libsvm test_data.libsvm
+
+# Cross-validation
+rsvm quick cv data.libsvm --ratio 0.8
+
+# Quick evaluation with custom parameters
+rsvm quick cv data.libsvm --ratio 0.8 -C 5.0
+```
+
+### Practical CLI Workflow
+
+Complete workflow using LibSVM data:
+
+```bash
+# 1. Create sample data
+cat > sample_data.libsvm << EOF
++1 1:2.0 2:1.0
++1 1:1.8 2:1.1
++1 1:2.2 2:0.9
+-1 1:-2.0 2:-1.0
+-1 1:-1.8 2:-1.1
+-1 1:-2.2 2:-0.9
+EOF
+
+# 2. Train model
+rsvm train --data sample_data.libsvm --output trained_model.json --verbose
+
+# 3. Check model info
+rsvm info trained_model.json
+
+# 4. Cross-validate
+rsvm quick cv sample_data.libsvm --ratio 0.8
+```
+
+### Parameter Tuning
+
+```bash
+# Batch evaluation with different C values
+for c in 0.1 1.0 10.0 100.0; do
+  echo "Testing C=$c"
+  rsvm quick cv data.libsvm -C $c --ratio 0.8
+done
+```
+
+### Current Limitations
+
+**Note**: The current CLI implementation has limitations with:
+
+- `predict` command: Prediction from saved models (placeholder implementation)
+- `evaluate` command: Evaluation using saved models (placeholder implementation)
+
+These features will be fully available once model reconstruction functionality is implemented. For now, use `quick` commands for real-time training and evaluation.
+
+For comprehensive CLI examples, see [CLI_EXAMPLES.md](CLI_EXAMPLES.md).
 
 ## Working with Data Formats
 
@@ -115,12 +242,18 @@ writeln!(file, "-1 1:-1.8 2:-1.1")?;
 
 #### Loading LibSVM Data
 
+In code:
 ```rust
 use rsvm::api::SVM;
 
 let model = SVM::new()
     .with_c(1.0)
     .train_from_file("data.libsvm")?;
+```
+
+With CLI:
+```bash
+rsvm train --data data.libsvm --output model.json
 ```
 
 ### CSV Format
@@ -141,6 +274,7 @@ feature1,feature2,label
 
 #### Loading CSV Data
 
+In code:
 ```rust
 use rsvm::api::SVM;
 
@@ -149,9 +283,43 @@ let model = SVM::new()
     .train_from_csv("data.csv")?;
 ```
 
+With CLI:
+```bash
+rsvm train --data data.csv --output model.json --format csv
+```
+
 ## Training Your First Model
 
-### Step 1: Prepare Your Data
+There are two ways to start training models with RSVM: using the CLI tool or programmatically with the API.
+
+### CLI Quick Training
+
+Start with the CLI for quick experimentation:
+
+```bash
+# Create sample data
+cat > first_training.libsvm << EOF
++1 1:2.0 2:2.0
++1 1:2.1 2:1.9
++1 1:1.9 2:2.1
+-1 1:-2.0 2:-2.0
+-1 1:-2.1 2:-1.9
+-1 1:-1.9 2:-2.1
+EOF
+
+# Train model
+rsvm train --data first_training.libsvm --output first_model.json --verbose
+
+# Check model info
+rsvm info first_model.json
+
+# Cross-validate
+rsvm quick cv first_training.libsvm --ratio 0.8
+```
+
+### Programmatic Training
+
+#### Step 1: Prepare Your Data
 
 Let's create a simple linearly separable dataset:
 
@@ -178,7 +346,7 @@ fn create_sample_data() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Step 2: Train the Model
+#### Step 2: Train the Model
 
 ```rust
 use rsvm::api::SVM;
@@ -202,7 +370,7 @@ fn train_model() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Step 3: Test the Model
+#### Step 3: Test the Model
 
 ```rust
 use rsvm::{Sample, SparseVector};
@@ -231,7 +399,23 @@ fn test_model(model: &rsvm::api::TrainedModel<rsvm::LinearKernel>) {
 
 ## Model Evaluation
 
-### Basic Accuracy
+### CLI Evaluation
+
+Quick evaluation using CLI:
+```bash
+# Cross-validation
+rsvm quick cv tutorial_data.libsvm --ratio 0.8
+
+# Separate train/test evaluation
+rsvm quick eval train_data.libsvm test_data.libsvm
+
+# Parameter tuning
+rsvm quick cv tutorial_data.libsvm --ratio 0.8 -C 5.0
+```
+
+### Programmatic Evaluation
+
+#### Basic Accuracy
 
 ```rust
 // Evaluate on training data (for verification)
@@ -239,7 +423,7 @@ let accuracy = model.evaluate_from_file("tutorial_data.libsvm")?;
 println!("Training accuracy: {:.1}%", accuracy * 100.0);
 ```
 
-### Detailed Metrics
+#### Detailed Metrics
 
 ```rust
 use rsvm::LibSVMDataset;
@@ -254,7 +438,7 @@ println!("F1 Score: {:.3}", metrics.f1_score());
 println!("Specificity: {:.3}", metrics.specificity());
 ```
 
-### Cross-Validation
+#### Cross-Validation
 
 ```rust
 use rsvm::api::quick;

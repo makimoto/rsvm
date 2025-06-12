@@ -10,7 +10,7 @@ A pure Rust implementation of Support Vector Machine (SVM) based on the SVMlight
 - **Multiple Data Formats**: LibSVM and CSV format support with auto-detection
 - **Linear Kernel**: Production-ready linear SVM implementation
 - **Model Persistence**: Save and load trained models in JSON format
-- **Comprehensive Testing**: 86 tests with 90%+ code coverage
+- **Comprehensive Testing**: 88 tests with 90%+ code coverage
 - **Memory Efficient**: LRU kernel caching and sparse data structures
 
 ## Status

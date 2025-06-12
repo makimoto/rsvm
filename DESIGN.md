@@ -9,7 +9,7 @@ This document describes the design and implementation of a Support Vector Machin
 - **Future Extensions** (Phase 2+): Advanced features including RBF kernels, working set optimization, and external QP solvers
 
 **Implementation Status** (December 2025):
-✅ **Completed**: Core SMO solver, linear kernel, LibSVM/CSV data formats, high-level API, comprehensive testing  
+✅ **Completed**: Core SMO solver, linear kernel, LibSVM/CSV data formats, high-level API, CLI application, model persistence, comprehensive testing  
 🚧 **Planned**: RBF/polynomial kernels, working set size > 2, shrinking heuristics, parallel optimization
 
 ## Mathematical Background
@@ -54,10 +54,14 @@ rsvm/
 ├── README.md          # Comprehensive documentation
 ├── DESIGN.md          # This technical design document
 ├── TUTORIAL.md        # Step-by-step user guide
+├── CLI_EXAMPLES.md    # Comprehensive CLI usage examples
 ├── CLAUDE.md          # Development context and guidelines
 ├── src/
 │   ├── lib.rs         # Main library interface
 │   ├── api.rs         # High-level user API with builder pattern
+│   ├── persistence.rs # Model serialization for CLI usage
+│   ├── bin/
+│   │   └── main.rs    # Command-line interface application
 │   ├── core/
 │   │   ├── mod.rs
 │   │   ├── types.rs      # SparseVector, Sample, OptimizerConfig
@@ -1465,6 +1469,43 @@ let accuracy = quick::evaluate_split("train.libsvm", "test.libsvm")?;
 let dataset = rsvm::LibSVMDataset::from_file("data.libsvm")?;
 let cv_accuracy = quick::simple_validation(&dataset, 0.8, 1.0)?;
 ```
+
+### Command-Line Interface
+
+RSVM includes a comprehensive CLI for production use without writing code:
+
+```bash
+# Basic training
+rsvm train --data training_data.libsvm --output model.json
+
+# Training with custom parameters
+rsvm train --data data.csv --output model.json --format csv -C 10.0 --epsilon 0.0001
+
+# Model information
+rsvm info model.json
+
+# Quick operations
+rsvm quick cv data.libsvm --ratio 0.8
+rsvm quick eval train.libsvm test.libsvm
+
+# Parameter tuning
+for c in 0.1 1.0 10.0; do
+  rsvm quick cv data.libsvm -C $c --ratio 0.8
+done
+```
+
+**CLI Features:**
+- Complete training pipeline with parameter control
+- Model persistence in JSON format with metadata
+- Cross-validation and evaluation workflows  
+- Support for both LibSVM and CSV data formats
+- Verbose output and debugging options
+
+**Current CLI Limitations:**
+- Predict/evaluate commands require model reconstruction (planned feature)
+- Use `quick` commands for immediate training + evaluation workflows
+
+See [CLI_EXAMPLES.md](CLI_EXAMPLES.md) for comprehensive usage examples.
 
 ## Actual Dependencies (Minimal Approach)
 
