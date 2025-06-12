@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["rsvm contributors"]
 description = "A pure Rust implementation of Support Vector Machine"
 repository = "https://github.com/yourusername/rsvm"
-license = "MIT OR BSD-3-Clause"
+license = "MIT"
 keywords = ["svm", "machine-learning", "classification"]
 categories = ["science", "algorithms"]
 

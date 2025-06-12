@@ -19,4 +19,4 @@ This project is under active development. See [DESIGN.md](DESIGN.md) for technic
 
 ## License
 
-This project aims to be licensed under MIT or BSD-3-Clause (TBD).
+This project is licensed under the [MIT License](LICENSE).

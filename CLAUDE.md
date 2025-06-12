@@ -10,11 +10,12 @@ Rust で実装する Support Vector Machine (SVM) ライブラリ。SVMlight 論
 ## 開発方針
 
 ### ライセンスポリシー
-- **目標ライセンス**: MIT/BSD-3-Clause
+- **採用ライセンス**: MIT
 - **依存関係**:
   - MIT、BSD-3-Clause、Apache-2.0 ライセンスのライブラリを優先
   - GPL、LGPL ライセンスの依存関係は避ける
   - 推移的依存関係も含めてライセンス互換性を確認
+  - MIT ライセンスとの互換性を重視
 
 ### 開発アプローチ
 - **インクリメンタル開発**: 全モジュールを一度に作るのではなく、段階的に構築
@@ -133,6 +134,7 @@ cargo tarpaulin --out Html
 - ライセンスチェック改善（マルチライセンス依存関係の適切な処理）
 - Rust Beta clippyワーニング修正（uninlined_format_args、ptr_arg、needless_range_loop）
 - CI環境での複数Rustツールチェーン対応
+- **MIT ライセンス採用決定**（Cargo.toml、LICENSE ファイル、ドキュメント更新）
 
 ## 注意事項
 - 過度な仮定を避け、不明な点は確認する
