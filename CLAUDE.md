@@ -128,6 +128,12 @@ cargo tarpaulin --out Html
 - **包括的CLI使用例ドキュメント作成**（CLI_EXAMPLES.md）
 - **プロダクション品質のSVMライブラリ + CLI完成**
 
+### 2025-06-13
+- **CI/CD問題解決とRust Beta互換性**（重要な学習セッション）
+- ライセンスチェック改善（マルチライセンス依存関係の適切な処理）
+- Rust Beta clippyワーニング修正（uninlined_format_args、ptr_arg、needless_range_loop）
+- CI環境での複数Rustツールチェーン対応
+
 ## 注意事項
 - 過度な仮定を避け、不明な点は確認する
 - 頻繁な進捗報告（初期は頻繁に、その後調整）
@@ -154,3 +160,62 @@ cargo tarpaulin --out Html
   git add .
   ```
 - **明確なコミットメッセージ**: 変更の目的と内容を明確に記述
+
+## CI/CD とクロスプラットフォーム開発のベストプラクティス
+
+### 学習した重要事項（2025-06-13の経験から）
+
+#### ライセンスチェックの複雑性
+- **課題**: マルチライセンス依存関係（例: "Apache-2.0 OR LGPL-2.1-or-later OR MIT"）で文字列マッチングによる誤検出
+- **解決策**: 
+  - ライセンス文字列の適切なパース処理を実装
+  - SPDX式の理解が必要（OR演算子の処理）
+  - GPL/LGPL**のみ**の依存関係を避け、代替選択肢があるものは許可
+- **教訓**: 単純な文字列検索では不十分、ライセンス互換性チェックには専用ロジックが必要
+
+#### Rust Beta互換性とClippy警告
+- **課題**: Rust Betaでの新しいclippy lintによるCI失敗
+  - `uninlined_format_args`: `format!("{}", var)` → `format!("{var}")`
+  - `ptr_arg`: `&Vec<T>` → `&[T]`
+  - `needless_range_loop`: インデックスループ → イテレータ
+- **解決策**:
+  - ローカルでBetaツールチェーンテストを必須とする
+  - `rustup run beta cargo clippy` での事前検証
+  - フォーマット文字列の統一的な更新
+- **教訓**: CI失敗の根本原因を特定せずに推測で修正するのは非効率
+
+#### 効果的なトラブルシューティングプロセス
+1. **CI失敗の正確な原因特定**:
+   - ログの詳細読み込み（どのジョブ、どのツールチェーン）
+   - 環境の違い（ubuntu-latest vs windows-latest）
+   - 推測ではなく事実に基づく分析
+
+2. **ローカル再現の重要性**:
+   - CI環境と同じツールチェーンでのローカルテスト
+   - `rustup install beta` → `rustup run beta cargo clippy`
+   - 修正前の問題確認と修正後の検証
+
+3. **段階的修正アプローチ**:
+   - 一度に全ての警告を修正しようとせず、段階的に対応
+   - 各修正後にローカルテストで検証
+   - コミット前に stable/beta 両方での動作確認
+
+#### クロスプラットフォーム考慮事項
+- **Windows vs Linux**: パスセパレータ、ファイルシステムの違い
+- **一時ファイル処理**: 環境依存の動作差異に注意
+- **複数Rustバージョン**: stable, beta, nightly での互換性維持
+
+### 推奨されるCI/CDワークフロー
+```bash
+# ローカル開発時の必須チェック
+cargo fmt                              # フォーマット
+cargo clippy -- -D warnings           # stable clippy
+rustup run beta cargo clippy -- -D warnings  # beta clippy
+cargo test                             # テスト実行
+```
+
+### 今後の改善案
+- CI失敗時のより詳細なログ出力
+- ライセンスチェック機能の継続的改善
+- 複数Rustバージョンでの定期的な互換性テスト
+- 依存関係更新時のライセンス再チェック自動化
