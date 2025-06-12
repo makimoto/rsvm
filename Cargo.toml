@@ -41,6 +41,9 @@ approx = "0.5"
 # Benchmarking - MIT/Apache-2.0
 criterion = "0.5"
 
+# Temporary files for testing - MIT/Apache-2.0
+tempfile = "3.8"
+
 [features]
 default = []
 serde_support = ["serde"]

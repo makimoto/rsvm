@@ -398,6 +398,52 @@ mod tests {
     }
 
     #[test]
+    fn test_smo_solver_max_iterations() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.max_iterations = 1; // Force early termination
+        config.epsilon = 0.00001; // Very tight tolerance to ensure it would need more iterations
+        
+        let solver = SMOSolver::new(kernel, config);
+        
+        // Create a problem that needs many iterations
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), -1.0),
+        ];
+        
+        let result = solver.solve(&samples).expect("Should solve");
+        
+        // Should hit max iterations
+        assert_eq!(result.iterations, 1);
+    }
+
+    #[test]
+    fn test_smo_solver_non_bound_iteration() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.c = 10.0; // High C to ensure some alphas are not at bounds
+        config.max_iterations = 5; // Limited iterations to test both paths
+        
+        let solver = SMOSolver::new(kernel, config);
+        
+        // XOR-like problem that's not linearly separable
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), 1.0),
+        ];
+        
+        let result = solver.solve(&samples).expect("Should solve");
+        
+        // Should complete within max iterations
+        assert!(result.iterations <= 5);
+    }
+
+    #[test]
     fn test_smo_solver_linearly_separable() {
         let kernel = Arc::new(LinearKernel::new());
         let mut config = OptimizerConfig::default();

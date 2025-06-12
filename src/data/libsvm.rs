@@ -321,4 +321,31 @@ mod tests {
         assert_eq!(sample.features.indices, vec![0, 999, 4999]); // 0-based indices
         assert_eq!(sample.features.values, vec![1.0, 2.0, 3.0]);
     }
+
+    #[test]
+    fn test_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary file with libsvm data
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        writeln!(temp_file, "+1 1:0.5 3:1.2").expect("Failed to write");
+        writeln!(temp_file, "-1 2:0.3 5:2.1").expect("Failed to write");
+        temp_file.flush().expect("Failed to flush");
+
+        // Test loading from file
+        let dataset = LibSVMDataset::from_file(temp_file.path()).unwrap();
+        
+        assert_eq!(dataset.len(), 2);
+        assert_eq!(dataset.dim(), 5);
+        assert_eq!(dataset.get_labels(), vec![1.0, -1.0]);
+    }
+
+    #[test]
+    fn test_from_file_io_error() {
+        // Test with non-existent file
+        let result = LibSVMDataset::from_file("/non/existent/file.libsvm");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SVMError::IoError(_)));
+    }
 }

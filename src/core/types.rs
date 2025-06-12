@@ -227,4 +227,11 @@ mod tests {
         assert_eq!(empty.nnz(), 0);
         assert!(empty.is_empty());
     }
+
+    #[test]
+    #[should_panic(expected = "Indices and values must have same length")]
+    fn test_sparse_vector_length_mismatch() {
+        // This should panic due to length mismatch
+        SparseVector::new(vec![0, 1], vec![1.0, 2.0, 3.0]);
+    }
 }

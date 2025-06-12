@@ -331,4 +331,40 @@ mod tests {
         assert!(result.support_vectors.len() > 0);
         assert!(result.iterations > 0);
     }
+
+    #[test]
+    fn test_from_file() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        // Create a temporary CSV file
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        writeln!(temp_file, "feature1,feature2,label").expect("Failed to write");
+        writeln!(temp_file, "1.0,2.0,1").expect("Failed to write");
+        writeln!(temp_file, "3.0,4.0,-1").expect("Failed to write");
+        temp_file.flush().expect("Failed to flush");
+
+        // Test loading from file
+        let dataset = CSVDataset::from_file(temp_file.path()).unwrap();
+        
+        assert_eq!(dataset.len(), 2);
+        assert_eq!(dataset.dim(), 2);
+        assert_eq!(dataset.get_labels(), vec![1.0, -1.0]);
+    }
+
+    #[test]
+    fn test_from_file_io_error() {
+        // Test with non-existent file
+        let result = CSVDataset::from_file("/non/existent/file.csv");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SVMError::IoError(_)));
+    }
+
+    #[test]
+    fn test_empty_dataset() {
+        let data = "";
+        let reader = Cursor::new(data);
+        let result = CSVDataset::from_reader(reader);
+        assert!(matches!(result, Err(SVMError::EmptyDataset)));
+    }
 }
