@@ -182,7 +182,7 @@ impl<K: Kernel> SMOSolver<K> {
             || (r_i > self.config.epsilon && alpha_i > 0.0)
         {
             // Try to find a second variable to optimize with
-            if let Some(j) = self.select_second_variable(i, e_i, alpha, error_cache, samples)? {
+            if let Some(j) = self.select_second_variable(i, e_i, &*alpha, &*error_cache, samples)? {
                 if self.take_step(i, j, samples, alpha, error_cache)? {
                     return Ok(true);
                 }
