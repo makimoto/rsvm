@@ -342,4 +342,90 @@ mod tests {
         chrono::DateTime::parse_from_rfc3339(&serializable.metadata.created_at)
             .expect("Should be valid RFC3339 timestamp");
     }
+
+    #[test]
+    fn test_multiple_save_load_cycles() -> Result<()> {
+        // Create a model with more complex data to ensure serialization paths are covered
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1, 5], vec![1.5, -2.3, 4.7]), 1.0),
+            Sample::new(
+                SparseVector::new(vec![0, 2, 3], vec![-1.5, 2.3, -4.7]),
+                -1.0,
+            ),
+            Sample::new(SparseVector::new(vec![1, 4], vec![0.5, 1.2]), 1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples)?;
+        let serializable = SerializableModel::from_trained_model(&model);
+
+        // Test multiple save/load cycles to ensure all code paths
+        for _ in 0..3 {
+            let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+
+            // This should cover lines 121-123 in save_to_file
+            serializable.save_to_file(temp_file.path())?;
+
+            // This should cover lines 130, 133 in load_from_file
+            let loaded = SerializableModel::load_from_file(temp_file.path())?;
+
+            // Verify the loaded model matches
+            assert_eq!(loaded.kernel_type, serializable.kernel_type);
+            assert_eq!(loaded.bias, serializable.bias);
+            assert_eq!(
+                loaded.support_vectors.len(),
+                serializable.support_vectors.len()
+            );
+            assert_eq!(loaded.alpha_y.len(), serializable.alpha_y.len());
+
+            // Check individual support vectors
+            for (orig, loaded_sv) in serializable
+                .support_vectors
+                .iter()
+                .zip(loaded.support_vectors.iter())
+            {
+                assert_eq!(orig.indices, loaded_sv.indices);
+                assert_eq!(orig.values, loaded_sv.values);
+                assert_eq!(orig.label, loaded_sv.label);
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_round_trip_serialization_edge_cases() -> Result<()> {
+        // Test with edge case data that might trigger different serialization paths
+        let samples = vec![
+            // Large sparse vector with many features
+            Sample::new(
+                SparseVector::new(
+                    vec![0, 10, 100, 1000, 5000],
+                    vec![f64::MIN, 0.0, f64::MAX, -f64::INFINITY, f64::INFINITY],
+                ),
+                1.0,
+            ),
+            Sample::new(SparseVector::new(vec![1], vec![-1e-10]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples)?;
+        let serializable = SerializableModel::from_trained_model(&model);
+
+        // Create temp file and ensure save/load works with edge cases
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+
+        // Save (should hit line 121-123)
+        serializable.save_to_file(temp_file.path())?;
+
+        // Load (should hit lines 130, 133)
+        let loaded = SerializableModel::load_from_file(temp_file.path())?;
+
+        // Verify
+        assert_eq!(loaded.kernel_type, "linear");
+        assert_eq!(
+            loaded.support_vectors.len(),
+            serializable.support_vectors.len()
+        );
+
+        Ok(())
+    }
 }
