@@ -30,6 +30,9 @@ pub enum SVMError {
 
     #[error("Parse error: {0}")]
     ParseError(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
 }
 
 pub type Result<T> = std::result::Result<T, SVMError>;

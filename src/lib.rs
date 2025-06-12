@@ -8,6 +8,7 @@ pub mod core;
 pub mod data;
 pub mod kernel;
 pub mod optimizer;
+pub mod persistence;
 pub mod solver;
 pub mod utils;
 

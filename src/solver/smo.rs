@@ -6,7 +6,6 @@
 use crate::cache::KernelCache;
 use crate::core::{OptimizationResult, OptimizerConfig, Result, SVMError, Sample};
 use crate::kernel::Kernel;
-use ndarray::Array1;
 use std::sync::Arc;
 
 /// SMO solver for SVM optimization
@@ -78,7 +77,7 @@ impl<K: Kernel> SMOSolver<K> {
 
         // Special case: single sample
         if n == 1 {
-            let mut alpha = Array1::zeros(1);
+            let mut alpha = vec![0.0; 1];
             let alpha_val = self.config.c.min(1.0); // Simple heuristic for single sample
             alpha[0] = alpha_val;
             return Ok(OptimizationResult {
@@ -91,7 +90,7 @@ impl<K: Kernel> SMOSolver<K> {
         }
 
         // Initialize alpha values (all zeros initially)
-        let mut alpha = Array1::zeros(n);
+        let mut alpha = vec![0.0; n];
 
         // Initialize error cache: E_i = output_i - y_i
         // Initially, output_i = 0 (since all alphas are 0), so E_i = -y_i
@@ -166,7 +165,7 @@ impl<K: Kernel> SMOSolver<K> {
         &self,
         i: usize,
         samples: &[Sample],
-        alpha: &mut Array1<f64>,
+        alpha: &mut Vec<f64>,
         error_cache: &mut [f64],
     ) -> Result<bool> {
         let y_i = samples[i].label;
@@ -198,7 +197,7 @@ impl<K: Kernel> SMOSolver<K> {
         &self,
         i: usize,
         e_i: f64,
-        _alpha: &Array1<f64>,
+        _alpha: &Vec<f64>,
         error_cache: &[f64],
         _samples: &[Sample],
     ) -> Result<Option<usize>> {
@@ -228,7 +227,7 @@ impl<K: Kernel> SMOSolver<K> {
         i: usize,
         j: usize,
         samples: &[Sample],
-        alpha: &mut Array1<f64>,
+        alpha: &mut Vec<f64>,
         error_cache: &mut [f64],
     ) -> Result<bool> {
         if i == j {
@@ -325,7 +324,7 @@ impl<K: Kernel> SMOSolver<K> {
     /// Calculate the bias term from support vectors
     fn calculate_bias(
         &self,
-        alpha: &Array1<f64>,
+        alpha: &Vec<f64>,
         error_cache: &[f64],
         samples: &[Sample],
     ) -> Result<f64> {
@@ -361,7 +360,7 @@ impl<K: Kernel> SMOSolver<K> {
     }
 
     /// Calculate the objective function value
-    fn calculate_objective(&self, alpha: &Array1<f64>, samples: &[Sample]) -> Result<f64> {
+    fn calculate_objective(&self, alpha: &Vec<f64>, samples: &[Sample]) -> Result<f64> {
         let mut obj = 0.0;
         let n = samples.len();
 

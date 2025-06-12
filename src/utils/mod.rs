@@ -1,7 +1,6 @@
 //! Utility functions for SVM operations
 
 use crate::core::{Dataset, Sample};
-use rayon::prelude::*;
 
 /// Validation and preprocessing utilities
 pub mod validation {
@@ -124,7 +123,7 @@ pub mod parallel {
         let sample_i = &samples[row_index];
 
         samples[start_col..]
-            .par_iter()
+            .iter()
             .map(|sample_j| kernel.compute(&sample_i.features, &sample_j.features))
             .collect()
     }
@@ -135,7 +134,7 @@ pub mod parallel {
         samples: &[Sample],
     ) -> Vec<crate::core::Prediction> {
         samples
-            .par_iter()
+            .iter()
             .map(|sample| model.predict(sample))
             .collect()
     }

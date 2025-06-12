@@ -1,7 +1,5 @@
 //! Core type definitions for SVM
 
-use ndarray::Array1;
-
 /// Prediction result containing label and decision value
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Prediction {
@@ -109,7 +107,7 @@ impl Sample {
 #[derive(Debug, Clone)]
 pub struct OptimizationResult {
     /// Lagrange multipliers (alpha values)
-    pub alpha: Array1<f64>,
+    pub alpha: Vec<f64>,
     /// Bias term (b)
     pub b: f64,
     /// Indices of support vectors (where alpha > 0)

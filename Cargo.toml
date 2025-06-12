@@ -10,31 +10,27 @@ keywords = ["svm", "machine-learning", "classification"]
 categories = ["science", "algorithms"]
 
 [dependencies]
-# Linear algebra - MIT/Apache-2.0
-ndarray = { version = "0.15", features = ["rayon"] }
-
-# Parallelization - MIT/Apache-2.0
-rayon = "1.7"
-
-# Caching - MIT/Apache-2.0
-lru = "0.12"
-
-# Numeric traits - MIT/Apache-2.0
-num-traits = "0.2"
-
 # Error handling - MIT/Apache-2.0
 thiserror = "1.0"
 
-# Logging facade - MIT/Apache-2.0
+# LRU cache - MIT/Apache-2.0
+lru = "0.12"
+
+# Command line argument parsing - MIT/Apache-2.0
+clap = { version = "4.4", features = ["derive"] }
+
+# Serialization for model saving/loading - MIT/Apache-2.0
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging - MIT/Apache-2.0
 log = "0.4"
-
-# Optional: Serialization - MIT/Apache-2.0
-serde = { version = "1.0", features = ["derive"], optional = true }
-
-[dev-dependencies]
-# Test logging - MIT/Apache-2.0
 env_logger = "0.10"
 
+# Date/time handling - MIT/Apache-2.0
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
 # Float comparison - Apache-2.0
 approx = "0.5"
 
@@ -46,7 +42,10 @@ tempfile = "3.8"
 
 [features]
 default = []
-serde_support = ["serde"]
+
+[[bin]]
+name = "rsvm"
+path = "src/bin/main.rs"
 
 [[bench]]
 name = "kernel_benchmark"

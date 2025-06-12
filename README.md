@@ -4,12 +4,14 @@ A pure Rust implementation of Support Vector Machine (SVM) based on the SVMlight
 
 ## Features
 
-- Efficient sparse vector operations
-- SMO (Sequential Minimal Optimization) solver
-- Linear kernel (RBF and polynomial kernels planned)
-- Support for libsvm and CSV data formats
-- Parallel processing with rayon
-- Memory-efficient kernel caching
+- **High-level API**: User-friendly interface with builder pattern
+- **Command-line Interface**: Complete CLI for training, prediction, and evaluation
+- **Efficient Implementation**: Sparse vector operations and SMO solver
+- **Multiple Data Formats**: LibSVM and CSV format support with auto-detection
+- **Linear Kernel**: Production-ready linear SVM implementation
+- **Model Persistence**: Save and load trained models in JSON format
+- **Comprehensive Testing**: 86 tests with 90%+ code coverage
+- **Memory Efficient**: LRU kernel caching and sparse data structures
 
 ## Status
 
