@@ -322,8 +322,7 @@ pub mod quick {
     pub fn simple_validation<D: Dataset>(dataset: &D, train_ratio: f64, c: f64) -> Result<f64> {
         if train_ratio <= 0.0 || train_ratio >= 1.0 {
             return Err(SVMError::InvalidParameter(format!(
-                "Train ratio must be between 0 and 1, got: {}",
-                train_ratio
+                "Train ratio must be between 0 and 1, got: {train_ratio}"
             )));
         }
 

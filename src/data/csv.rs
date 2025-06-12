@@ -139,8 +139,7 @@ impl CSVDataset {
 
         if fields.len() < 2 {
             return Err(SVMError::ParseError(format!(
-                "Line has too few fields: {}",
-                line
+                "Line has too few fields: {line}"
             )));
         }
 
@@ -148,7 +147,7 @@ impl CSVDataset {
         let label_str = fields[fields.len() - 1];
         let label = label_str
             .parse::<f64>()
-            .map_err(|_| SVMError::ParseError(format!("Invalid label: {}", label_str)))?;
+            .map_err(|_| SVMError::ParseError(format!("Invalid label: {label_str}")))?;
 
         // Convert to binary label if needed
         let label = if label == 1.0 || label == -1.0 {

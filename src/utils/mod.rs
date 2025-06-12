@@ -12,8 +12,7 @@ pub mod validation {
         for (i, &label) in labels.iter().enumerate() {
             if label != 1.0 && label != -1.0 {
                 return Err(format!(
-                    "Invalid label {} at index {}: labels must be +1 or -1",
-                    label, i
+                    "Invalid label {label} at index {i}: labels must be +1 or -1"
                 ));
             }
         }

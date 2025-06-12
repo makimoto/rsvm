@@ -98,8 +98,7 @@ impl LibSVMDataset {
 
             if feature_parts.len() != 2 {
                 return Err(SVMError::ParseError(format!(
-                    "Invalid feature format: {}",
-                    feature_str
+                    "Invalid feature format: {feature_str}"
                 )));
             }
 
@@ -116,8 +115,7 @@ impl LibSVMDataset {
                 index - 1
             } else {
                 return Err(SVMError::ParseError(format!(
-                    "Feature index must be positive: {}",
-                    index
+                    "Feature index must be positive: {index}"
                 )));
             };
 
