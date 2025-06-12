@@ -537,4 +537,193 @@ mod tests {
         assert_eq!(result.alpha.len(), 1);
         // Single sample case should have specific behavior
     }
+
+    #[test]
+    fn test_kernel_cached_method() {
+        let kernel = Arc::new(LinearKernel::new());
+        let config = OptimizerConfig::default();
+        let solver = SMOSolver::new(kernel, config);
+        let mut cache = KernelCache::with_memory_limit(1000);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), -1.0),
+        ];
+
+        // Test cache miss then cache hit
+        let value1 = solver.kernel_cached(&mut cache, &samples, 0, 1);
+        let value2 = solver.kernel_cached(&mut cache, &samples, 0, 1);
+        assert_eq!(value1, value2);
+        assert!(cache.get(0, 1).is_some());
+    }
+
+    #[test]
+    fn test_smo_examine_all_transitions() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.c = 0.5; // Low C to create bound samples
+        config.max_iterations = 10;
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This should exercise the non-bound examination path
+        assert!(result.iterations >= 1);
+    }
+
+    #[test]
+    fn test_take_step_same_labels() {
+        let kernel = Arc::new(LinearKernel::new());
+        let config = OptimizerConfig::default();
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0), // Same label
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This exercises the same signs branch in take_step
+        assert!(result.alpha.len() == 3);
+    }
+
+    #[test]
+    fn test_take_step_small_c_boundary() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.c = 0.001; // Very small C to force boundary conditions
+        let c_value = config.c; // Store C value before moving config
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This should exercise boundary conditions in take_step
+        assert!(result.alpha.iter().all(|&a| a <= c_value + 1e-10));
+    }
+
+    #[test]
+    fn test_error_cache_with_larger_dataset() {
+        let kernel = Arc::new(LinearKernel::new());
+        let config = OptimizerConfig::default();
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-0.5]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.5]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // Larger dataset ensures error cache update loops run multiple times
+        assert!(result.support_vectors.len() > 0);
+        assert_eq!(result.alpha.len(), 6);
+    }
+
+    #[test]
+    fn test_bias_calculation_extreme_cases() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.c = 0.0001; // Very small C to force specific bias calculation paths
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This should exercise extreme bias calculation scenarios
+        assert!(result.b.is_finite());
+    }
+
+    #[test]
+    fn test_identical_features_different_labels() {
+        let kernel = Arc::new(LinearKernel::new());
+        let config = OptimizerConfig::default();
+        let solver = SMOSolver::new(kernel, config);
+
+        // Create samples with identical features but different labels
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), -1.0), // Same features, different label
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This exercises challenging second variable selection cases
+        assert_eq!(result.alpha.len(), 3);
+    }
+
+    #[test]
+    fn test_objective_calculation_mixed_alphas() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.max_iterations = 2; // Limited iterations to keep some alphas at zero
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-0.5]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This should exercise both zero and non-zero alpha paths in objective calculation
+        assert!(result.objective_value.is_finite());
+        assert!(result.objective_value >= 0.0); // Objective should be non-negative
+    }
+
+    #[test]
+    fn test_zero_kernel_values() {
+        let kernel = Arc::new(LinearKernel::new());
+        let config = OptimizerConfig::default();
+        let solver = SMOSolver::new(kernel, config);
+
+        // Create samples that produce zero kernel values
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![0.0]), 1.0), // Zero feature
+            Sample::new(SparseVector::new(vec![0], vec![0.0]), -1.0), // Zero feature
+            Sample::new(SparseVector::new(vec![1], vec![1.0]), 1.0), // Different dimension
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // This exercises zero kernel value handling and eta edge cases
+        assert_eq!(result.alpha.len(), 3);
+    }
+
+    #[test]
+    fn test_high_tolerance_convergence() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.epsilon = 1.0; // Very high tolerance for quick convergence
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![0.1]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-0.1]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve");
+        // High tolerance should lead to quick convergence with few iterations
+        assert!(result.iterations <= 3);
+    }
 }
