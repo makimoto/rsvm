@@ -2,7 +2,15 @@
 
 ## Overview
 
-This document describes the implementation of a Support Vector Machine (SVM) library in Rust, based on the SVMlight paper "Making Large-Scale SVM Learning Practical" by Thorsten Joachims.
+This document describes the design and implementation of a Support Vector Machine (SVM) library in Rust, based on the SVMlight paper "Making Large-Scale SVM Learning Practical" by Thorsten Joachims.
+
+**Document Structure**:
+- **Current Implementation** (Phase 1): Production-ready SMO-based SVM with linear kernel
+- **Future Extensions** (Phase 2+): Advanced features including RBF kernels, working set optimization, and external QP solvers
+
+**Implementation Status** (December 2025):
+✅ **Completed**: Core SMO solver, linear kernel, LibSVM/CSV data formats, high-level API, comprehensive testing  
+🚧 **Planned**: RBF/polynomial kernels, working set size > 2, shrinking heuristics, parallel optimization
 
 ## Mathematical Background
 
@@ -36,48 +44,47 @@ where λ^eq is the Lagrange multiplier for the equality constraint, equivalent t
 
 ## Architecture
 
-### Project Structure
+### Current Implementation (Phase 1)
+
+#### Project Structure
 
 ```
-svm-rust/
+rsvm/
 ├── Cargo.toml
-├── README.md          # To be written during development
+├── README.md          # Comprehensive documentation
 ├── DESIGN.md          # This technical design document
-├── LICENSE            # MIT or BSD-3-Clause license file
+├── TUTORIAL.md        # Step-by-step user guide
+├── CLAUDE.md          # Development context and guidelines
 ├── src/
-│   ├── lib.rs
+│   ├── lib.rs         # Main library interface
+│   ├── api.rs         # High-level user API with builder pattern
 │   ├── core/
 │   │   ├── mod.rs
-│   │   ├── types.rs      # Basic type definitions
-│   │   └── traits.rs     # Core traits
+│   │   ├── types.rs      # SparseVector, Sample, OptimizerConfig
+│   │   ├── traits.rs     # Dataset, SVMModel, Kernel traits
+│   │   └── error.rs      # Error types with thiserror
 │   ├── kernel/
 │   │   ├── mod.rs
-│   │   ├── traits.rs     # Kernel trait
-│   │   ├── linear.rs     # Linear kernel implementation
-│   │   └── rbf.rs        # RBF kernel (future)
-│   ├── optimizer/
-│   │   ├── mod.rs
-│   │   ├── traits.rs     # Optimizer trait
-│   │   ├── working_set.rs
-│   │   ├── decomposition.rs
-│   │   └── shrinking.rs
+│   │   └── linear.rs     # Efficient linear kernel implementation
 │   ├── solver/
 │   │   ├── mod.rs
-│   │   ├── traits.rs     # QP solver trait
-│   │   └── external.rs   # External solver wrapper
+│   │   └── smo.rs        # Sequential Minimal Optimization solver
+│   ├── optimizer/
+│   │   └── mod.rs        # High-level optimization interface
 │   ├── data/
 │   │   ├── mod.rs
-│   │   ├── dense.rs      # Dense matrix support
-│   │   └── sparse.rs     # Sparse matrix support
+│   │   ├── libsvm.rs     # LibSVM format parser
+│   │   └── csv.rs        # CSV format parser with auto-detection
 │   ├── cache/
-│   │   ├── mod.rs
-│   │   └── lru.rs        # LRU cache implementation
+│   │   └── mod.rs        # LRU kernel cache with symmetric optimization
 │   └── utils/
-│       ├── mod.rs
-│       └── parallel.rs   # Parallel processing utilities
+│       └── mod.rs        # Statistics and validation utilities
 ├── examples/
 ├── benches/
-└── tests/
+├── tests/
+│   ├── integration_tests.rs      # End-to-end testing
+│   └── dataset_compatibility.rs  # Format validation
+└── .github/workflows/ci.yml      # CI/CD pipeline
 ```
 
 ## Core Components
@@ -85,13 +92,23 @@ svm-rust/
 ### 1. Core Types and Traits (src/core/)
 
 ```rust
-// src/core/types.rs
-use ndarray::Array1;
+// src/core/types.rs (Actual Implementation)
 
 #[derive(Debug, Clone)]
 pub struct Prediction {
     pub label: f64,
     pub decision_value: f64,
+}
+
+impl Prediction {
+    pub fn new(label: f64, decision_value: f64) -> Self {
+        Self { label, decision_value }
+    }
+
+    /// Get confidence as absolute decision value
+    pub fn confidence(&self) -> f64 {
+        self.decision_value.abs()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -102,13 +119,25 @@ pub struct SparseVector {
 
 impl SparseVector {
     /// Create a new sparse vector, ensuring indices are sorted
-    pub fn new(mut indices: Vec<usize>, mut values: Vec<f64>) -> Self {
+    pub fn new(indices: Vec<usize>, values: Vec<f64>) -> Self {
+        if indices.len() != values.len() {
+            panic!("Indices and values must have same length");
+        }
+
         // Sort by indices
         let mut pairs: Vec<_> = indices.into_iter().zip(values).collect();
         pairs.sort_by_key(|&(idx, _)| idx);
 
         let (indices, values): (Vec<_>, Vec<_>) = pairs.into_iter().unzip();
         Self { indices, values }
+    }
+
+    /// Create empty sparse vector
+    pub fn empty() -> Self {
+        Self {
+            indices: Vec::new(),
+            values: Vec::new(),
+        }
     }
 
     /// Get the value at a specific index (0 if not present)
@@ -123,30 +152,47 @@ impl SparseVector {
     pub fn norm_squared(&self) -> f64 {
         self.values.iter().map(|&v| v * v).sum()
     }
+
+    /// Check if vector is empty
+    pub fn is_empty(&self) -> bool {
+        self.indices.is_empty()
+    }
+
+    /// Get number of non-zero elements
+    pub fn len(&self) -> usize {
+        self.indices.len()
+    }
 }
 
+#[derive(Clone, Debug)]
 pub struct Sample {
     pub features: SparseVector,
     pub label: f64,  // +1 or -1 for binary classification
 }
 
+impl Sample {
+    pub fn new(features: SparseVector, label: f64) -> Self {
+        Self { features, label }
+    }
+}
+
+/// Results from SMO optimization
+#[derive(Debug, Clone)]
 pub struct OptimizationResult {
-    pub alpha: Array1<f64>,          // Lagrange multipliers
-    pub b: f64,                      // Bias term
+    pub alpha: Vec<f64>,             // Lagrange multipliers
+    pub bias: f64,                   // Bias term
     pub support_vectors: Vec<usize>, // Indices of support vectors
     pub iterations: usize,
     pub objective_value: f64,
 }
 
-/// Configuration for optimizer
+/// Configuration for SMO optimizer
+#[derive(Debug, Clone)]
 pub struct OptimizerConfig {
-    pub c: f64,                      // Regularization parameter (upper bound for alpha)
+    pub c: f64,                      // Regularization parameter
     pub epsilon: f64,                // Tolerance for KKT conditions
     pub max_iterations: usize,
-    pub working_set_size: usize,     // q in the paper (must be even)
     pub cache_size: usize,           // Kernel cache size in bytes
-    pub shrinking: bool,             // Enable shrinking heuristic
-    pub shrinking_iterations: usize, // h in the paper
 }
 
 impl Default for OptimizerConfig {
@@ -154,19 +200,16 @@ impl Default for OptimizerConfig {
         Self {
             c: 1.0,
             epsilon: 0.001,
-            max_iterations: 10000,
-            working_set_size: 2,
+            max_iterations: 1000,
             cache_size: 100_000_000, // 100MB
-            shrinking: true,
-            shrinking_iterations: 100,
         }
     }
 }
 ```
 
 ```rust
-// src/core/traits.rs
-use std::error::Error;
+// src/core/traits.rs (Actual Implementation)
+use crate::core::{Prediction, Sample};
 
 /// Dataset abstraction for efficient data access
 pub trait Dataset: Send + Sync {
@@ -177,14 +220,9 @@ pub trait Dataset: Send + Sync {
     fn dim(&self) -> usize;
 
     /// Get a single sample by index
-    /// # Panics
-    /// Panics if index >= len()
     fn get_sample(&self, i: usize) -> Sample;
 
-    /// Get multiple samples efficiently (for parallel processing)
-    fn get_batch(&self, indices: &[usize]) -> Vec<Sample>;
-
-    /// Get all labels as a vector (for initialization)
+    /// Get all labels as a vector
     fn get_labels(&self) -> Vec<f64>;
 
     /// Check if the dataset is empty
@@ -193,16 +231,30 @@ pub trait Dataset: Send + Sync {
     }
 }
 
-/// Trained SVM model
+/// Kernel function trait
+pub trait Kernel: Send + Sync + Clone {
+    /// Compute kernel value between two sparse vectors
+    fn compute(&self, x1: &crate::core::SparseVector, x2: &crate::core::SparseVector) -> f64;
+}
+
+/// Trained SVM model interface
 pub trait SVMModel: Send + Sync {
     /// Predict a single sample
     fn predict(&self, sample: &Sample) -> Prediction;
 
-    /// Predict multiple samples in parallel
-    fn predict_batch(&self, samples: &[Sample]) -> Vec<Prediction>;
+    /// Predict multiple samples (default implementation)
+    fn predict_batch(&self, samples: &[Sample]) -> Vec<Prediction> {
+        samples.iter().map(|s| self.predict(s)).collect()
+    }
 
     /// Get the number of support vectors
     fn n_support_vectors(&self) -> usize;
+
+    /// Get bias term
+    fn bias(&self) -> f64;
+
+    /// Get support vector indices
+    fn support_vector_indices(&self) -> &[usize];
 }
 ```
 
@@ -1334,42 +1386,388 @@ cargo tree --format "{p} {l}"
 - Frequent progress updates initially, then adjust cadence
 - Japanese for discussions, English for codebase
 
-## Usage Example
+## Implementation Status and Deviations from Original Design
+
+### Key Implementation Decisions
+
+1. **SMO-First Approach**: Instead of general QP solvers, implemented dedicated SMO algorithm for better performance and fewer dependencies.
+
+2. **Builder Pattern API**: User-friendly interface with method chaining instead of configuration structs.
+
+3. **Integrated Data Formats**: Built-in LibSVM and CSV parsers instead of generic dense/sparse data structures.
+
+4. **Simplified Dependencies**: No ndarray, rayon, or external QP solvers - keeping dependencies minimal for better compatibility.
+
+### Actual API Usage
 
 ```rust
-use svm_rust::{SVM, SVMConfig, LinearKernel, DenseDataset};
+use rsvm::api::SVM;
+use rsvm::{Sample, SparseVector};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load dataset (libsvm format or CSV)
-    let dataset = DenseDataset::from_file("data.txt")?;
+    // Method 1: Train from file (LibSVM format)
+    let model = SVM::new()
+        .with_c(1.0)
+        .with_epsilon(0.001)
+        .with_max_iterations(1000)
+        .train_from_file("data.libsvm")?;
 
-    // Configure SVM
-    let config = SVMConfig {
-        c: 1.0,
-        epsilon: 0.001,
-        cache_size: 100_000_000, // 100MB
-        working_set_size: 2,     // SMO-style
-        shrinking: true,
-        n_jobs: Some(4),         // Use 4 threads
-        ..Default::default()
-    };
+    // Method 2: Train from CSV file
+    let model = SVM::new()
+        .with_c(10.0)
+        .train_from_csv("data.csv")?;
 
-    // Train model
-    let mut svm = SVM::new(LinearKernel, config);
-    svm.fit(&dataset)?;
-
-    // Get model info
-    if let Some(info) = svm.model_info() {
-        println!("Support vectors: {}", info.n_support_vectors);
-        println!("Bias term: {}", info.bias);
-    }
+    // Method 3: Train from samples
+    let samples = vec![
+        Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 1.0]), 1.0),
+        Sample::new(SparseVector::new(vec![0, 1], vec![-2.0, -1.0]), -1.0),
+    ];
+    let model = SVM::new().train_samples(&samples)?;
 
     // Make predictions
-    let sample = dataset.get_sample(0);
-    let prediction = svm.predict(&sample)?;
-    println!("Prediction: {}, confidence: {}",
-             prediction.label, prediction.decision_value.abs());
+    let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![1.5, 0.8]), 1.0);
+    let prediction = model.predict(&test_sample);
+    println!("Predicted: {}, Confidence: {:.3}", 
+             prediction.label, prediction.confidence());
+
+    // Evaluate model
+    let accuracy = model.evaluate_from_file("test.libsvm")?;
+    println!("Accuracy: {:.1}%", accuracy * 100.0);
+
+    // Get detailed metrics
+    let dataset = rsvm::LibSVMDataset::from_file("test.libsvm")?;
+    let metrics = model.evaluate_detailed(&dataset);
+    println!("Precision: {:.3}, Recall: {:.3}, F1: {:.3}",
+             metrics.precision(), metrics.recall(), metrics.f1_score());
+
+    // Model information
+    let info = model.info();
+    println!("Support vectors: {}, Bias: {:.3}",
+             info.n_support_vectors, info.bias);
 
     Ok(())
 }
 ```
+
+### Quick Functions for Common Tasks
+
+```rust
+use rsvm::api::quick;
+
+// One-liner training
+let model = quick::train_libsvm("data.libsvm")?;
+let model = quick::train_csv("data.csv")?;
+
+// Quick evaluation with train/test split
+let accuracy = quick::evaluate_split("train.libsvm", "test.libsvm")?;
+
+// Simple cross-validation
+let dataset = rsvm::LibSVMDataset::from_file("data.libsvm")?;
+let cv_accuracy = quick::simple_validation(&dataset, 0.8, 1.0)?;
+```
+
+## Actual Dependencies (Minimal Approach)
+
+```toml
+[dependencies]
+# Error handling - MIT/Apache-2.0
+thiserror = "1.0"
+
+# LRU cache - MIT/Apache-2.0
+lru = "0.12"
+
+[dev-dependencies]
+# Temporary files for testing - MIT/Apache-2.0
+tempfile = "3.8"
+```
+
+### Benefits of Simplified Approach
+
+1. **Faster Compilation**: Fewer dependencies mean faster build times
+2. **Better Portability**: Minimal dependencies reduce compatibility issues
+3. **Clearer Code**: Specialized SMO implementation is easier to understand than generic QP approach
+4. **Better Performance**: Direct implementation avoids abstraction overhead
+5. **Educational Value**: Clear mapping to the Joachims paper algorithms
+
+---
+
+## Future Extensions (Phase 2+)
+
+### Advanced Optimization Algorithms
+
+#### 1. Working Set Selection (Section 11.3.2 from paper)
+
+```rust
+// src/optimizer/working_set.rs (Future)
+pub struct WorkingSetSelector;
+
+impl WorkingSetSelector {
+    /// Select working set using most violating pair strategy
+    /// Returns indices of variables to optimize (q > 2 support)
+    pub fn select_most_violating(
+        gradient: &Vec<f64>,
+        alpha: &Vec<f64>, 
+        y: &Vec<f64>,
+        c: f64,
+        size: usize, // q in the paper (must be even)
+    ) -> Vec<usize> {
+        // Implementation of algorithm from Section 11.3.2
+        // Select q/2 most violating examples from top and bottom
+    }
+}
+```
+
+#### 2. Shrinking Heuristic (Section 11.4)
+
+```rust
+// src/optimizer/shrinking.rs (Future)
+pub struct ShrinkingStrategy {
+    lower_bound_history: Vec<VecDeque<bool>>,
+    upper_bound_history: Vec<VecDeque<bool>>,
+    history_size: usize, // h in the paper
+}
+
+impl ShrinkingStrategy {
+    /// Track Lagrange multiplier estimates over h iterations
+    pub fn update(&mut self, gradient: &Vec<f64>, alpha: &Vec<f64>, y: &Vec<f64>, c: f64);
+    
+    /// Identify variables that can be shrunk to bounds
+    pub fn get_shrinkable_indices(&self) -> (Vec<usize>, Vec<usize>);
+}
+```
+
+#### 3. External QP Solver Integration
+
+```rust
+// src/solver/external.rs (Future)
+pub trait QPSolver: Send + Sync {
+    fn solve(
+        &self,
+        q: &Array2<f64>,      // Quadratic term matrix
+        p: &Array1<f64>,      // Linear term vector  
+        a_eq: &Array2<f64>,   // Equality constraints
+        b_eq: &Array1<f64>,   // Equality bounds
+        bounds: &[(f64, f64)], // Variable bounds
+    ) -> Result<Array1<f64>, Box<dyn Error>>;
+}
+
+// MIT/Apache-2.0 compatible solvers
+#[cfg(feature = "osqp")]
+pub struct OSQPSolver { /* OSQP integration */ }
+
+#[cfg(feature = "clarabel")] 
+pub struct ClarabelSolver { /* Pure Rust solver */ }
+```
+
+### Advanced Kernel Implementations
+
+#### RBF Kernel (Gaussian)
+
+```rust
+// src/kernel/rbf.rs (Future)
+#[derive(Clone)]
+pub struct RBFKernel {
+    gamma: f64, // γ parameter: K(x,y) = exp(-γ||x-y||²)
+}
+
+impl RBFKernel {
+    pub fn new(gamma: f64) -> Self { Self { gamma } }
+    
+    /// Efficient computation avoiding full vector materialization
+    fn squared_distance(x1: &SparseVector, x2: &SparseVector) -> f64 {
+        // Optimized sparse computation: ||x-y||² = ||x||² + ||y||² - 2⟨x,y⟩
+    }
+}
+
+impl Kernel for RBFKernel {
+    fn compute(&self, x1: &SparseVector, x2: &SparseVector) -> f64 {
+        let dist_sq = Self::squared_distance(x1, x2);
+        (-self.gamma * dist_sq).exp()
+    }
+}
+```
+
+#### Polynomial Kernel
+
+```rust
+// src/kernel/polynomial.rs (Future)  
+#[derive(Clone)]
+pub struct PolynomialKernel {
+    degree: u32,    // d parameter
+    gamma: f64,     // γ parameter  
+    coef0: f64,     // r parameter: K(x,y) = (γ⟨x,y⟩ + r)^d
+}
+```
+
+### Parallel Processing Optimization
+
+```rust
+// src/utils/parallel.rs (Future)
+use rayon::prelude::*;
+
+pub struct ParallelOptimizer {
+    n_threads: usize,
+}
+
+impl ParallelOptimizer {
+    /// Parallel kernel row computation
+    pub fn compute_kernel_row<K: Kernel>(
+        kernel: &K,
+        x: &SparseVector, 
+        dataset: &dyn Dataset,
+        indices: &[usize],
+    ) -> Vec<f64> {
+        indices.par_iter()
+            .map(|&i| {
+                let sample = dataset.get_sample(i);
+                kernel.compute(x, &sample.features)
+            })
+            .collect()
+    }
+    
+    /// Parallel gradient updates
+    pub fn update_gradient_parallel(
+        gradient: &mut Vec<f64>,
+        kernel_cache: &KernelCache,
+        changed_indices: &[usize],
+        delta_alpha: &[f64],
+        y: &[f64],
+    ) {
+        // Parallel implementation of gradient updates
+    }
+}
+```
+
+### Advanced Data Format Support
+
+```rust
+// src/data/dense.rs (Future)
+pub struct DenseDataset {
+    samples: Array2<f64>,    // n_samples × n_features
+    labels: Array1<f64>,
+}
+
+// src/data/arff.rs (Future) 
+pub struct ArffDataset {
+    // Weka ARFF format support
+}
+
+// src/data/hdf5.rs (Future)
+pub struct HDF5Dataset {
+    // Large-scale data format support
+}
+```
+
+### Multi-class Classification
+
+```rust
+// src/multiclass/mod.rs (Future)
+pub enum MultiClassStrategy {
+    OneVsOne,           // n(n-1)/2 binary classifiers
+    OneVsRest,          // n binary classifiers  
+    DirectMulticlass,   // Native multi-class formulation
+}
+
+pub struct MultiClassSVM<K: Kernel> {
+    strategy: MultiClassStrategy,
+    binary_classifiers: Vec<TrainedModel<K>>,
+}
+```
+
+### GPU Acceleration
+
+```rust
+// src/gpu/mod.rs (Future)
+#[cfg(feature = "cuda")]
+pub mod cuda {
+    pub struct CudaKernelCompute {
+        // CUDA kernel matrix computation
+    }
+}
+
+#[cfg(feature = "opencl")]  
+pub mod opencl {
+    pub struct OpenCLKernelCompute {
+        // OpenCL kernel matrix computation
+    }
+}
+```
+
+### Model Serialization & Persistence
+
+```rust
+// src/persistence/mod.rs (Future)
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct SerializableModel {
+    support_vectors: Vec<Sample>,
+    alpha_y: Vec<f64>,
+    bias: f64,
+    kernel_params: KernelParams,
+}
+
+impl TrainedModel<K> {
+    pub fn save_to_file(&self, path: &Path) -> Result<()>;
+    pub fn load_from_file(path: &Path) -> Result<Self>;
+}
+```
+
+### Future Dependencies (Advanced Features)
+
+```toml
+[dependencies]
+# Linear algebra for advanced algorithms - MIT/Apache-2.0
+ndarray = { version = "0.15", features = ["rayon"], optional = true }
+
+# Parallelization - MIT/Apache-2.0  
+rayon = { version = "1.7", optional = true }
+
+# Serialization - MIT/Apache-2.0
+serde = { version = "1.0", features = ["derive"], optional = true }
+
+# Optional QP solvers (all MIT/Apache-2.0 compatible)
+osqp = { version = "0.6", optional = true }
+clarabel = { version = "0.6", optional = true }
+
+# GPU acceleration (MIT/Apache-2.0)
+cudarc = { version = "0.9", optional = true }
+opencl3 = { version = "0.8", optional = true }
+
+# Large data formats
+hdf5 = { version = "0.8", optional = true }
+
+[features]
+default = []
+advanced = ["ndarray", "rayon"]
+parallel = ["rayon"] 
+gpu = ["cudarc"]
+serialization = ["serde"]
+external-solvers = ["osqp", "clarabel"]
+large-data = ["hdf5"]
+```
+
+### Implementation Roadmap
+
+#### Phase 2: Advanced Kernels
+- RBF kernel with γ parameter tuning
+- Polynomial kernel implementation  
+- Kernel parameter optimization
+
+#### Phase 3: Optimization Enhancements
+- Working set size q > 2
+- Shrinking heuristic implementation
+- External QP solver integration
+
+#### Phase 4: Scalability
+- Parallel kernel computation
+- GPU acceleration
+- Large dataset support (HDF5, streaming)
+
+#### Phase 5: Advanced Features  
+- Multi-class classification
+- Model serialization
+- Cross-validation utilities
+- Hyperparameter optimization
+
+This roadmap maintains the **mathematical rigor** of the original design while building upon the **solid foundation** of the current SMO implementation.
