@@ -80,7 +80,4 @@ jobs:
       run: cargo install cargo-license
     
     - name: Check licenses
-      run: |
-        cargo license
-        # Fail if GPL or LGPL dependencies are found
-        ! cargo license | grep -E "(GPL|LGPL)" || (echo "Found GPL/LGPL dependencies!" && exit 1)
+      run: ./scripts/check-licenses.sh
