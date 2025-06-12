@@ -461,6 +461,6 @@ mod tests {
         let dataset = MockDataset { samples };
         let accuracy =
             quick::simple_validation(&dataset, 0.7, 1.0).expect("Validation should succeed");
-        assert!(accuracy >= 0.0 && accuracy <= 1.0);
+        assert!((0.0..=1.0).contains(&accuracy));
     }
 }
