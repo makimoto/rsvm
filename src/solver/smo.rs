@@ -165,7 +165,7 @@ impl<K: Kernel> SMOSolver<K> {
         &self,
         i: usize,
         samples: &[Sample],
-        alpha: &mut Vec<f64>,
+        alpha: &mut [f64],
         error_cache: &mut [f64],
     ) -> Result<bool> {
         let y_i = samples[i].label;
@@ -197,7 +197,7 @@ impl<K: Kernel> SMOSolver<K> {
         &self,
         i: usize,
         e_i: f64,
-        _alpha: &Vec<f64>,
+        _alpha: &[f64],
         error_cache: &[f64],
         _samples: &[Sample],
     ) -> Result<Option<usize>> {
@@ -227,7 +227,7 @@ impl<K: Kernel> SMOSolver<K> {
         i: usize,
         j: usize,
         samples: &[Sample],
-        alpha: &mut Vec<f64>,
+        alpha: &mut [f64],
         error_cache: &mut [f64],
     ) -> Result<bool> {
         if i == j {
@@ -324,7 +324,7 @@ impl<K: Kernel> SMOSolver<K> {
     /// Calculate the bias term from support vectors
     fn calculate_bias(
         &self,
-        alpha: &Vec<f64>,
+        alpha: &[f64],
         error_cache: &[f64],
         samples: &[Sample],
     ) -> Result<f64> {
@@ -360,13 +360,13 @@ impl<K: Kernel> SMOSolver<K> {
     }
 
     /// Calculate the objective function value
-    fn calculate_objective(&self, alpha: &Vec<f64>, samples: &[Sample]) -> Result<f64> {
+    fn calculate_objective(&self, alpha: &[f64], samples: &[Sample]) -> Result<f64> {
         let mut obj = 0.0;
         let n = samples.len();
 
         // Sum of alpha_i
-        for i in 0..n {
-            obj += alpha[i];
+        for &a in alpha.iter().take(n) {
+            obj += a;
         }
 
         // Subtract 0.5 * sum_i sum_j alpha_i * alpha_j * y_i * y_j * K(x_i, x_j)

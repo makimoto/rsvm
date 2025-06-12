@@ -10,7 +10,7 @@ use rsvm::api::{quick, SVM};
 use rsvm::core::Result;
 use rsvm::persistence::SerializableModel;
 use rsvm::{CSVDataset, Dataset, LibSVMDataset};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process;
 
 #[derive(Parser)]
@@ -437,7 +437,7 @@ fn quick_command(args: QuickArgs) -> Result<()> {
 }
 
 
-fn detect_format(path: &PathBuf) -> String {
+fn detect_format(path: &Path) -> String {
     if let Some(ext) = path.extension() {
         match ext.to_str() {
             Some("csv") => "csv".to_string(),
