@@ -13,7 +13,7 @@ pub mod utils;
 // Re-export main types
 pub use crate::core::traits::*;
 pub use crate::core::types::*;
-pub use crate::data::{LibSVMDataset};
+pub use crate::data::{CSVDataset, LibSVMDataset};
 pub use crate::kernel::{Kernel, LinearKernel};
 
 // Version info
