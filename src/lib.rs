@@ -15,6 +15,7 @@ pub use crate::core::traits::*;
 pub use crate::core::types::*;
 pub use crate::data::{CSVDataset, LibSVMDataset};
 pub use crate::kernel::{Kernel, LinearKernel};
+pub use crate::optimizer::{SVMOptimizer, TrainedSVM};
 
 // Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
