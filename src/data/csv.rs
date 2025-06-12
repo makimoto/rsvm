@@ -379,4 +379,87 @@ mod tests {
         let result = CSVDataset::from_reader(reader);
         assert!(matches!(result, Err(SVMError::EmptyDataset)));
     }
+
+    #[test]
+    fn test_csv_first_line_comment_handling() {
+        // Covers lines 66, 68 - comment processing in first line
+        let data = "# This is a comment\n1.0,2.0,1\n3.0,4.0,-1\n";
+        let reader = Cursor::new(data);
+        let dataset = CSVDataset::from_reader(reader).unwrap();
+
+        assert_eq!(dataset.len(), 2);
+        assert_eq!(dataset.get_labels(), vec![1.0, -1.0]);
+    }
+
+    #[test]
+    fn test_csv_all_samples_filtered_out() {
+        // Covers lines 83, 88 - when parse_data_line returns None/empty dataset
+        let data = "feature1,feature2,label\n# Only comment lines\n# Another comment\n\n";
+        let reader = Cursor::new(data);
+        let result = CSVDataset::from_reader(reader);
+        assert!(matches!(result, Err(SVMError::EmptyDataset)));
+    }
+
+    #[test]
+    fn test_csv_dimension_calculation_edge_cases() {
+        // Covers lines 92, 101-102, 104-105, 108 - dimension calculation paths
+
+        // Test case 1: High index features to test max index calculation
+        let data = "0,0,0,0,5.0,1\n0,0,0,0,3.0,-1\n"; // Feature at index 4
+        let reader = Cursor::new(data);
+        let dataset = CSVDataset::from_reader(reader).unwrap();
+        assert_eq!(dataset.dim(), 5); // Should be max_index + 1 = 4 + 1 = 5
+
+        // Test case 2: Many zero features to test feature count vs max index
+        // Only first and last features are non-zero to test both calculations
+        let data = "1,0,0,0,0,0,0,0,0,5,1\n2,0,0,0,0,0,0,0,0,3,-1\n";
+        let reader = Cursor::new(data);
+        let dataset = CSVDataset::from_reader(reader).unwrap();
+        assert_eq!(dataset.dim(), 10); // max_index + 1 = 9 + 1 = 10
+    }
+
+    #[test]
+    fn test_csv_from_reader_vs_from_file_consistency() {
+        // Covers lines 27-28 - direct from_reader call path in from_file
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let data = "1.0,2.0,1\n3.0,4.0,-1\n";
+
+        // Test direct from_reader
+        let reader1 = Cursor::new(data);
+        let dataset1 = CSVDataset::from_reader(reader1).unwrap();
+
+        // Test from_file which calls from_reader internally (lines 27-28)
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        write!(temp_file, "{}", data).expect("Failed to write");
+        temp_file.flush().expect("Failed to flush");
+
+        let dataset2 = CSVDataset::from_file(temp_file.path()).unwrap();
+
+        assert_eq!(dataset1.len(), dataset2.len());
+        assert_eq!(dataset1.dim(), dataset2.dim());
+        assert_eq!(dataset1.get_labels(), dataset2.get_labels());
+    }
+
+    #[test]
+    fn test_csv_only_comments_after_header() {
+        // Additional test to ensure all comment filtering paths are covered
+        let data = "feature1,feature2,label\n# Comment 1\n# Comment 2\n";
+        let reader = Cursor::new(data);
+        let result = CSVDataset::from_reader(reader);
+        assert!(matches!(result, Err(SVMError::EmptyDataset)));
+    }
+
+    #[test]
+    fn test_csv_dimension_calculation_with_empty_samples() {
+        // Edge case test for dimensions calculation with different scenarios
+        // This should test the fallback cases in dimension calculation
+
+        // Test with very sparse data (only last feature non-zero)
+        let data = "0,0,0,0,0,0,0,0,0,1.0,1\n0,0,0,0,0,0,0,0,0,2.0,-1\n";
+        let reader = Cursor::new(data);
+        let dataset = CSVDataset::from_reader(reader).unwrap();
+        assert_eq!(dataset.dim(), 10); // max index + 1 = 9 + 1 = 10
+    }
 }
