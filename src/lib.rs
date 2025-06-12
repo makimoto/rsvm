@@ -11,11 +11,13 @@ pub mod solver;
 pub mod utils;
 
 // Re-export main types
+pub use crate::cache::{CacheStats, KernelCache};
 pub use crate::core::traits::*;
 pub use crate::core::types::*;
 pub use crate::data::{CSVDataset, LibSVMDataset};
 pub use crate::kernel::{Kernel, LinearKernel};
 pub use crate::optimizer::{SVMOptimizer, TrainedSVM};
+pub use crate::utils::SparseVectorStats;
 
 // Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

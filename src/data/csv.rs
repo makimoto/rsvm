@@ -57,14 +57,14 @@ impl CSVDataset {
         } else {
             // Check if first line contains headers
             let has_header = if auto_detect_header {
-                Self::is_header_line(&first_line)
+                Self::is_header_line(first_line)
             } else {
                 false
             };
 
             // If no header, process the first line as data
             if !has_header {
-                if let Some(sample) = Self::parse_data_line(&first_line)? {
+                if let Some(sample) = Self::parse_data_line(first_line)? {
                     samples.push(sample);
                 }
             }
@@ -79,7 +79,7 @@ impl CSVDataset {
                 continue;
             }
 
-            if let Some(sample) = Self::parse_data_line(&line)? {
+            if let Some(sample) = Self::parse_data_line(line)? {
                 samples.push(sample);
             }
         }

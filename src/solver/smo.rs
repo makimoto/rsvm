@@ -3,6 +3,7 @@
 //! This implements the basic SMO algorithm for binary SVM classification,
 //! focusing on the 2-variable optimization problem (q=2 in the paper).
 
+use crate::cache::KernelCache;
 use crate::core::{OptimizationResult, OptimizerConfig, Result, SVMError, Sample};
 use crate::kernel::Kernel;
 use ndarray::Array1;
@@ -24,11 +25,44 @@ impl<K: Kernel> SMOSolver<K> {
         Self { kernel, config }
     }
 
+    /// Compute kernel value with caching
+    #[allow(dead_code)]
+    fn kernel_cached(
+        &self,
+        cache: &mut KernelCache,
+        samples: &[Sample],
+        i: usize,
+        j: usize,
+    ) -> f64 {
+        if let Some(value) = cache.get(i, j) {
+            value
+        } else {
+            let value = self
+                .kernel
+                .compute(&samples[i].features, &samples[j].features);
+            cache.put(i, j, value);
+            value
+        }
+    }
+
     /// Solve the SVM optimization problem
     ///
     /// Takes a dataset of training samples and returns the optimized
     /// alpha values, bias term, and other optimization results.
     pub fn solve(&self, samples: &[Sample]) -> Result<OptimizationResult> {
+        let mut cache = KernelCache::with_memory_limit(self.config.cache_size);
+        self.solve_with_cache(samples, &mut cache)
+    }
+
+    /// Solve the SVM optimization problem with provided kernel cache
+    ///
+    /// This method allows external cache management for better performance
+    /// when solving multiple related problems.
+    pub fn solve_with_cache(
+        &self,
+        samples: &[Sample],
+        _cache: &mut KernelCache,
+    ) -> Result<OptimizationResult> {
         if samples.is_empty() {
             return Err(SVMError::EmptyDataset);
         }
@@ -81,10 +115,11 @@ impl<K: Kernel> SMOSolver<K> {
             } else {
                 // Examine non-bound samples (0 < alpha < C)
                 for i in 0..n {
-                    if alpha[i] > 0.0 && alpha[i] < self.config.c {
-                        if self.examine_example(i, samples, &mut alpha, &mut error_cache)? {
-                            num_changed += 1;
-                        }
+                    if alpha[i] > 0.0
+                        && alpha[i] < self.config.c
+                        && self.examine_example(i, samples, &mut alpha, &mut error_cache)?
+                    {
+                        num_changed += 1;
                     }
                 }
             }
@@ -132,7 +167,7 @@ impl<K: Kernel> SMOSolver<K> {
         i: usize,
         samples: &[Sample],
         alpha: &mut Array1<f64>,
-        error_cache: &mut Vec<f64>,
+        error_cache: &mut [f64],
     ) -> Result<bool> {
         let y_i = samples[i].label;
         let alpha_i = alpha[i];
@@ -164,20 +199,18 @@ impl<K: Kernel> SMOSolver<K> {
         i: usize,
         e_i: f64,
         _alpha: &Array1<f64>,
-        error_cache: &Vec<f64>,
-        samples: &[Sample],
+        error_cache: &[f64],
+        _samples: &[Sample],
     ) -> Result<Option<usize>> {
-        let n = samples.len();
         let mut best_j = None;
         let mut max_diff = 0.0;
 
         // Look for the variable that maximizes |E_i - E_j|
-        for j in 0..n {
+        for (j, &e_j) in error_cache.iter().enumerate() {
             if j == i {
                 continue;
             }
 
-            let e_j = error_cache[j];
             let diff = (e_i - e_j).abs();
 
             if diff > max_diff {
@@ -196,7 +229,7 @@ impl<K: Kernel> SMOSolver<K> {
         j: usize,
         samples: &[Sample],
         alpha: &mut Array1<f64>,
-        error_cache: &mut Vec<f64>,
+        error_cache: &mut [f64],
     ) -> Result<bool> {
         if i == j {
             return Ok(false);
@@ -293,7 +326,7 @@ impl<K: Kernel> SMOSolver<K> {
     fn calculate_bias(
         &self,
         alpha: &Array1<f64>,
-        error_cache: &Vec<f64>,
+        error_cache: &[f64],
         samples: &[Sample],
     ) -> Result<f64> {
         let mut sum = 0.0;
