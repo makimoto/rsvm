@@ -48,7 +48,7 @@ enum Commands {
 #[derive(Args)]
 struct TrainArgs {
     /// Training data file (LibSVM or CSV format)
-    #[arg(short, long)]
+    #[arg(long)]
     data: PathBuf,
 
     /// Output model file
@@ -83,7 +83,7 @@ struct PredictArgs {
     model: PathBuf,
 
     /// Input data file
-    #[arg(short, long)]
+    #[arg(long)]
     data: PathBuf,
 
     /// Output predictions file (optional, prints to stdout if not specified)
@@ -106,7 +106,7 @@ struct EvaluateArgs {
     model: PathBuf,
 
     /// Test data file
-    #[arg(short, long)]
+    #[arg(long)]
     data: PathBuf,
 
     /// Data format: auto, libsvm, or csv

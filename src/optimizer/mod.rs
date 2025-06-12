@@ -291,4 +291,172 @@ mod tests {
             assert!(idx < samples.len());
         }
     }
+
+    #[test]
+    fn test_optimizer_kernel_access() {
+        let kernel = LinearKernel::new();
+        let optimizer = SVMOptimizer::with_kernel(kernel);
+
+        // Test kernel access
+        let _kernel_ref = optimizer.kernel();
+    }
+
+    #[test]
+    fn test_trained_svm_bias_access() {
+        let kernel = LinearKernel::new();
+        let optimizer = SVMOptimizer::with_kernel(kernel);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let model = optimizer
+            .train_samples(&samples)
+            .expect("Training should succeed");
+
+        // Test bias access
+        let bias = model.bias();
+        assert!(bias.is_finite());
+    }
+
+    #[test]
+    fn test_prediction_confidence_boundary() {
+        let kernel = LinearKernel::new();
+        let optimizer = SVMOptimizer::with_kernel(kernel);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let model = optimizer
+            .train_samples(&samples)
+            .expect("Training should succeed");
+
+        // Test prediction at decision boundary (close to zero decision value)
+        let boundary_sample = Sample::new(SparseVector::new(vec![0], vec![0.0]), 1.0);
+        let prediction = model.predict(&boundary_sample);
+
+        // Prediction should still be valid
+        assert!(prediction.label == 1.0 || prediction.label == -1.0);
+        assert!(prediction.confidence().is_finite());
+    }
+
+    #[test]
+    fn test_decision_function_zero_alpha() {
+        let kernel = LinearKernel::new();
+
+        // Create a mock optimization result with zero alpha values
+        use crate::core::OptimizationResult;
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let result = OptimizationResult {
+            alpha: vec![0.0, 0.0],
+            support_vectors: vec![0, 1],
+            b: 0.5,
+            iterations: 0,
+            objective_value: 0.0,
+        };
+
+        let model = TrainedSVM::new(Arc::new(kernel), samples.clone(), result);
+
+        // Test decision function with zero alpha values
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0);
+        let decision = model.decision_function(&test_sample);
+
+        // Should only return bias term
+        assert_eq!(decision, 0.5);
+    }
+
+    #[test]
+    fn test_empty_support_vectors() {
+        let kernel = LinearKernel::new();
+
+        let samples = vec![Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0)];
+
+        // Create a result with no support vectors
+        use crate::core::OptimizationResult;
+        let result = OptimizationResult {
+            alpha: vec![0.0],
+            support_vectors: vec![], // Empty support vectors
+            b: 0.0,
+            iterations: 0,
+            objective_value: 0.0,
+        };
+
+        let model = TrainedSVM::new(Arc::new(kernel), samples.clone(), result);
+
+        // Test with empty support vectors
+        assert_eq!(model.n_support_vectors(), 0);
+        assert_eq!(model.support_vectors().len(), 0);
+        assert_eq!(model.alpha_values().len(), 0);
+        assert_eq!(model.support_vector_indices().len(), 0);
+
+        // Decision function should only return bias
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0);
+        let decision = model.decision_function(&test_sample);
+        assert_eq!(decision, 0.0);
+    }
+
+    #[test]
+    fn test_custom_optimizer_config() {
+        let kernel = LinearKernel::new();
+        let mut config = OptimizerConfig::default();
+        config.c = 2.0;
+        config.epsilon = 0.01;
+        config.max_iterations = 500;
+        config.cache_size = 2048;
+
+        let optimizer = SVMOptimizer::new(kernel, config);
+
+        // Verify custom config is stored
+        assert_eq!(optimizer.config().c, 2.0);
+        assert_eq!(optimizer.config().epsilon, 0.01);
+        assert_eq!(optimizer.config().max_iterations, 500);
+        assert_eq!(optimizer.config().cache_size, 2048);
+    }
+
+    #[test]
+    fn test_train_with_dataset() {
+        use crate::core::Dataset;
+
+        // Mock dataset implementation
+        struct MockDataset {
+            samples: Vec<Sample>,
+        }
+
+        impl Dataset for MockDataset {
+            fn len(&self) -> usize {
+                self.samples.len()
+            }
+            fn dim(&self) -> usize {
+                1
+            }
+            fn get_sample(&self, i: usize) -> Sample {
+                self.samples[i].clone()
+            }
+            fn get_labels(&self) -> Vec<f64> {
+                self.samples.iter().map(|s| s.label).collect()
+            }
+        }
+
+        let kernel = LinearKernel::new();
+        let optimizer = SVMOptimizer::with_kernel(kernel);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let dataset = MockDataset { samples };
+        let model = optimizer.train(&dataset).expect("Training should succeed");
+
+        // Verify training works with dataset interface
+        assert!(model.n_support_vectors() > 0);
+    }
 }
