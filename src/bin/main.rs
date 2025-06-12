@@ -178,7 +178,7 @@ fn main() {
     };
 
     if let Err(e) = result {
-        error!("Error: {}", e);
+        error!("Error: {e}");
         process::exit(1);
     }
 }
@@ -198,7 +198,7 @@ fn train_command(args: TrainArgs) -> Result<()> {
         args.format.clone()
     };
 
-    info!("Loading dataset as {} format", format);
+    info!("Loading dataset as {format} format");
 
     // Process different formats separately to avoid trait object issues
     match format.as_str() {
@@ -211,8 +211,7 @@ fn train_command(args: TrainArgs) -> Result<()> {
             train_with_dataset(&args, dataset)
         }
         _ => Err(rsvm::core::SVMError::InvalidParameter(format!(
-            "Unsupported format: {}. Use 'libsvm' or 'csv'",
-            format
+            "Unsupported format: {format}. Use 'libsvm' or 'csv'"
         ))),
     }
 }
@@ -280,8 +279,7 @@ fn predict_command(args: PredictArgs) -> Result<()> {
         }
         _ => {
             return Err(rsvm::core::SVMError::InvalidParameter(format!(
-                "Unsupported format: {}",
-                format
+                "Unsupported format: {format}"
             )))
         }
     };
@@ -294,7 +292,7 @@ fn predict_command(args: PredictArgs) -> Result<()> {
     );
 
     // Print prediction format that would be output
-    println!("# Predictions for {} samples", dataset_len);
+    println!("# Predictions for {dataset_len} samples");
     println!(
         "# Format: sample_index predicted_label{}",
         if args.confidence { " confidence" } else { "" }
@@ -307,9 +305,9 @@ fn predict_command(args: PredictArgs) -> Result<()> {
         let dummy_confidence = 0.8;
 
         if args.confidence {
-            println!("{} {:.0} {:.3}", i, dummy_prediction, dummy_confidence);
+            println!("{i} {dummy_prediction:.0} {dummy_confidence:.3}");
         } else {
-            println!("{} {:.0}", i, dummy_prediction);
+            println!("{i} {dummy_prediction:.0}");
         }
     }
 
@@ -343,31 +341,27 @@ fn evaluate_command(args: EvaluateArgs) -> Result<()> {
         }
         _ => {
             return Err(rsvm::core::SVMError::InvalidParameter(format!(
-                "Unsupported format: {}",
-                format
+                "Unsupported format: {format}"
             )))
         }
     };
 
     warn!("Model reconstruction not yet fully implemented");
-    info!(
-        "Test dataset: {} samples, {} dimensions",
-        dataset_len, dataset_dim
-    );
+    info!("Test dataset: {dataset_len} samples, {dataset_dim} dimensions");
 
     // Show what evaluation would look like
     println!("=== Model Evaluation ===");
     serializable_model.print_summary();
     println!("\nTest Dataset:");
-    println!("  Samples: {}", dataset_len);
-    println!("  Dimensions: {}", dataset_dim);
+    println!("  Samples: {dataset_len}");
+    println!("  Dimensions: {dataset_dim}");
 
     // For demo, compute some basic dataset statistics
     let pos_count = labels.iter().filter(|&&l| l > 0.0).count();
     let neg_count = labels.len() - pos_count;
 
-    println!("  Positive samples: {}", pos_count);
-    println!("  Negative samples: {}", neg_count);
+    println!("  Positive samples: {pos_count}");
+    println!("  Negative samples: {neg_count}");
     println!(
         "  Balance ratio: {:.2}",
         pos_count as f64 / neg_count as f64
@@ -408,7 +402,7 @@ fn info_command(args: InfoArgs) -> Result<()> {
     let alpha_y = &serializable_model.alpha_y;
     let n_show = alpha_y.len().min(10);
     for (i, &alpha_y_val) in alpha_y.iter().enumerate().take(n_show) {
-        println!("  α{}*y{}: {:.6}", i, i, alpha_y_val);
+        println!("  α{i}*y{i}: {alpha_y_val:.6}");
     }
     if alpha_y.len() > n_show {
         println!("  ... ({} more)", alpha_y.len() - n_show);
@@ -420,20 +414,20 @@ fn info_command(args: InfoArgs) -> Result<()> {
 fn quick_command(args: QuickArgs) -> Result<()> {
     match args.operation {
         QuickOperation::Eval { train, test, c } => {
-            info!("Quick evaluation: train on {:?}, test on {:?}", train, test);
+            info!("Quick evaluation: train on {train:?}, test on {test:?}");
 
             let accuracy = quick::evaluate_split(&train, &test)?;
 
             println!("=== Quick Evaluation Results ===");
-            println!("Training file: {:?}", train);
-            println!("Test file: {:?}", test);
-            println!("C parameter: {}", c);
+            println!("Training file: {train:?}");
+            println!("Test file: {test:?}");
+            println!("C parameter: {c}");
             println!("Test accuracy: {:.2}%", accuracy * 100.0);
 
             Ok(())
         }
         QuickOperation::Cv { data, ratio, c } => {
-            info!("Cross-validation on {:?} with ratio {}", data, ratio);
+            info!("Cross-validation on {data:?} with ratio {ratio}");
 
             let format = detect_format(&data);
             let accuracy = match format.as_str() {
@@ -447,16 +441,15 @@ fn quick_command(args: QuickArgs) -> Result<()> {
                 }
                 _ => {
                     return Err(rsvm::core::SVMError::InvalidParameter(format!(
-                        "Unsupported format: {}",
-                        format
+                        "Unsupported format: {format}"
                     )))
                 }
             };
 
             println!("=== Cross-Validation Results ===");
-            println!("Data file: {:?}", data);
-            println!("Train/test ratio: {:.1}/{:.1}", ratio, 1.0 - ratio);
-            println!("C parameter: {}", c);
+            println!("Data file: {data:?}");
+            println!("Train/test ratio: {ratio:.1}/{:.1}", 1.0 - ratio);
+            println!("C parameter: {c}");
             println!("CV accuracy: {:.2}%", accuracy * 100.0);
 
             Ok(())
