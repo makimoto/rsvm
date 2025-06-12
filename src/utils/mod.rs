@@ -205,6 +205,170 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_binary_labels_invalid() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 0.5), // Invalid label
+        ];
+
+        struct MockDataset {
+            samples: Vec<Sample>,
+        }
+
+        impl Dataset for MockDataset {
+            fn len(&self) -> usize {
+                self.samples.len()
+            }
+            fn dim(&self) -> usize {
+                1
+            }
+            fn get_sample(&self, i: usize) -> Sample {
+                self.samples[i].clone()
+            }
+            fn get_labels(&self) -> Vec<f64> {
+                self.samples.iter().map(|s| s.label).collect()
+            }
+        }
+
+        let dataset = MockDataset { samples };
+        let result = validation::validate_binary_labels(&dataset);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("Invalid label 0.5 at index 1"));
+    }
+
+    #[test]
+    fn test_check_label_balance() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![3.0]), -1.0),
+        ];
+
+        struct MockDataset {
+            samples: Vec<Sample>,
+        }
+
+        impl Dataset for MockDataset {
+            fn len(&self) -> usize {
+                self.samples.len()
+            }
+            fn dim(&self) -> usize {
+                1
+            }
+            fn get_sample(&self, i: usize) -> Sample {
+                self.samples[i].clone()
+            }
+            fn get_labels(&self) -> Vec<f64> {
+                self.samples.iter().map(|s| s.label).collect()
+            }
+        }
+
+        let dataset = MockDataset { samples };
+        let (pos, neg, ratio) = validation::check_label_balance(&dataset);
+        assert_eq!(pos, 2);
+        assert_eq!(neg, 1);
+        assert_eq!(ratio, 2.0);
+    }
+
+    #[test]
+    fn test_check_label_balance_infinity() {
+        // Test case where there are no negative samples
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+        ];
+
+        struct MockDataset {
+            samples: Vec<Sample>,
+        }
+
+        impl Dataset for MockDataset {
+            fn len(&self) -> usize {
+                self.samples.len()
+            }
+            fn dim(&self) -> usize {
+                1
+            }
+            fn get_sample(&self, i: usize) -> Sample {
+                self.samples[i].clone()
+            }
+            fn get_labels(&self) -> Vec<f64> {
+                self.samples.iter().map(|s| s.label).collect()
+            }
+        }
+
+        let dataset = MockDataset { samples };
+        let (pos, neg, ratio) = validation::check_label_balance(&dataset);
+        assert_eq!(pos, 2);
+        assert_eq!(neg, 0);
+        assert!(ratio.is_infinite());
+    }
+
+    #[test]
+    fn test_validate_feature_sparsity() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 2], vec![1.0, 2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![1], vec![3.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1, 2], vec![4.0, 5.0, 6.0]), 1.0),
+        ];
+
+        let (max_dim, sparsity) = validation::validate_feature_sparsity(&samples);
+        assert_eq!(max_dim, 3); // Max index is 2, so max dimension is 3
+
+        // Total features: 2 + 1 + 3 = 6
+        // Total possible: 3 samples * 3 dimensions = 9
+        // Sparsity: 6/9 = 0.6666...
+        assert!((sparsity - 6.0 / 9.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_validate_feature_sparsity_empty() {
+        let samples = vec![];
+        let (max_dim, sparsity) = validation::validate_feature_sparsity(&samples);
+        assert_eq!(max_dim, 0);
+        assert_eq!(sparsity, 0.0);
+    }
+
+    #[test]
+    fn test_compute_kernel_row() {
+        use crate::kernel::LinearKernel;
+
+        let kernel = LinearKernel::new();
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![3.0]), 1.0),
+        ];
+
+        let row = parallel::compute_kernel_row(&kernel, &samples, 0, 1);
+        assert_eq!(row.len(), 2); // Should compute for samples 1 and 2
+        assert_eq!(row[0], 2.0); // kernel(samples[0], samples[1]) = 1*2 = 2
+        assert_eq!(row[1], 3.0); // kernel(samples[0], samples[2]) = 1*3 = 3
+    }
+
+    #[test]
+    fn test_parallel_predict_batch() {
+        use crate::api::SVM;
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples).unwrap();
+        let test_samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let predictions = parallel::predict_batch(model.inner(), &test_samples);
+        assert_eq!(predictions.len(), 2);
+        assert_eq!(predictions[0].label, 1.0);
+        assert_eq!(predictions[1].label, -1.0);
+    }
+
+    #[test]
     fn test_sparse_vector_stats() {
         let samples = vec![
             Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 2.0]), 1.0), // 2 nnz

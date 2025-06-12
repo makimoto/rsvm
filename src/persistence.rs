@@ -12,7 +12,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 /// Serializable representation of a trained SVM model
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct SerializableModel {
     /// Support vectors
     pub support_vectors: Vec<SerializableSample>,
@@ -27,7 +27,7 @@ pub struct SerializableModel {
 }
 
 /// Serializable sample representation
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SerializableSample {
     /// Feature indices
     pub indices: Vec<usize>,
@@ -38,7 +38,7 @@ pub struct SerializableSample {
 }
 
 /// Model metadata for tracking and validation
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ModelMetadata {
     /// Library version used to create the model
     pub library_version: String,
@@ -51,7 +51,7 @@ pub struct ModelMetadata {
 }
 
 /// Training parameters for reference
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TrainingParams {
     pub c: f64,
     pub epsilon: f64,
@@ -215,5 +215,131 @@ mod tests {
         assert_eq!(loaded.bias, serializable.bias);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_save_file_io_error() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples).unwrap();
+        let serializable = SerializableModel::from_trained_model(&model);
+
+        // Try to save to an invalid path
+        let result = serializable.save_to_file("/invalid/path/model.json");
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, SVMError::IoError(_)));
+        }
+    }
+
+    #[test]
+    fn test_load_file_io_error() {
+        // Try to load from non-existent file
+        let result = SerializableModel::load_from_file("/non/existent/file.json");
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, SVMError::IoError(_)));
+        }
+    }
+
+    #[test]
+    fn test_load_invalid_json() {
+        use std::io::Write;
+
+        // Create a file with invalid JSON
+        let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        writeln!(temp_file, "{{ invalid json }}").expect("Failed to write");
+        temp_file.flush().expect("Failed to flush");
+
+        let result = SerializableModel::load_from_file(temp_file.path());
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, SVMError::SerializationError(_)));
+        }
+    }
+
+    #[test]
+    fn test_to_trained_model_unsupported_kernel() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples).unwrap();
+        let mut serializable = SerializableModel::from_trained_model(&model);
+
+        // Change kernel type to something unsupported
+        serializable.kernel_type = "rbf".to_string();
+
+        let result = serializable.to_trained_model();
+        assert!(result.is_err());
+        if let Err(e) = result {
+            assert!(matches!(e, SVMError::InvalidParameter(_)));
+        }
+    }
+
+    #[test]
+    fn test_to_trained_model_not_implemented() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples).unwrap();
+        let serializable = SerializableModel::from_trained_model(&model);
+
+        // This should return not implemented error
+        let result = serializable.to_trained_model();
+        assert!(result.is_err());
+        if let Err(SVMError::InvalidParameter(msg)) = result {
+            assert!(msg.contains("not yet implemented"));
+        } else {
+            panic!("Expected InvalidParameter error");
+        }
+    }
+
+    #[test]
+    fn test_print_summary() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples).unwrap();
+        let serializable = SerializableModel::from_trained_model(&model);
+
+        // This should not panic and should print to stdout
+        serializable.print_summary();
+    }
+
+    #[test]
+    fn test_metadata_fields() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new().train_samples(&samples).unwrap();
+        let serializable = SerializableModel::from_trained_model(&model);
+
+        // Check metadata fields
+        assert_eq!(
+            serializable.metadata.library_version,
+            env!("CARGO_PKG_VERSION")
+        );
+        assert_eq!(
+            serializable.metadata.n_support_vectors,
+            serializable.support_vectors.len()
+        );
+        assert_eq!(serializable.metadata.training_params.c, 1.0);
+        assert_eq!(serializable.metadata.training_params.epsilon, 0.001);
+        assert_eq!(serializable.metadata.training_params.max_iterations, 1000);
+
+        // Check that created_at is a valid RFC3339 timestamp
+        chrono::DateTime::parse_from_rfc3339(&serializable.metadata.created_at)
+            .expect("Should be valid RFC3339 timestamp");
     }
 }
