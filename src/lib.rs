@@ -2,6 +2,7 @@
 //!
 //! Based on "Making Large-Scale SVM Learning Practical" by Thorsten Joachims
 
+pub mod api;
 pub mod cache;
 pub mod core;
 pub mod data;
@@ -10,7 +11,8 @@ pub mod optimizer;
 pub mod solver;
 pub mod utils;
 
-// Re-export main types
+// Re-export main types for convenience
+pub use crate::api::{EvaluationMetrics, ModelInfo, TrainedModel, SVM};
 pub use crate::cache::{CacheStats, KernelCache};
 pub use crate::core::traits::*;
 pub use crate::core::types::*;
