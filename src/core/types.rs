@@ -185,18 +185,18 @@ mod tests {
         assert_eq!(sv.norm_squared(), 25.0);
         assert_eq!(sv.norm(), 5.0);
     }
-    
+
     #[test]
     fn test_prediction() {
         let pred = Prediction::new(1.0, 2.5);
         assert_eq!(pred.label, 1.0);
         assert_eq!(pred.decision_value, 2.5);
         assert_eq!(pred.confidence(), 2.5);
-        
+
         let neg_pred = Prediction::new(-1.0, -1.8);
         assert_eq!(neg_pred.confidence(), 1.8);
     }
-    
+
     #[test]
     fn test_sample() {
         let features = SparseVector::new(vec![0, 2], vec![1.0, 3.0]);
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(sample.label, 1.0);
         assert_eq!(sample.features, features);
     }
-    
+
     #[test]
     fn test_optimizer_config_default() {
         let config = OptimizerConfig::default();
@@ -216,13 +216,13 @@ mod tests {
         assert!(!config.shrinking);
         assert_eq!(config.shrinking_iterations, 100);
     }
-    
+
     #[test]
     fn test_sparse_vector_utilities() {
         let sv = SparseVector::new(vec![1, 3], vec![2.0, 4.0]);
         assert_eq!(sv.nnz(), 2);
         assert!(!sv.is_empty());
-        
+
         let empty = SparseVector::empty();
         assert_eq!(empty.nnz(), 0);
         assert!(empty.is_empty());

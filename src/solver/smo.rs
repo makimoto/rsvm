@@ -3,7 +3,7 @@
 //! This implements the basic SMO algorithm for binary SVM classification,
 //! focusing on the 2-variable optimization problem (q=2 in the paper).
 
-use crate::core::{OptimizerConfig, OptimizationResult, Sample, SVMError, Result};
+use crate::core::{OptimizationResult, OptimizerConfig, Result, SVMError, Sample};
 use crate::kernel::Kernel;
 use ndarray::Array1;
 use std::sync::Arc;
@@ -41,7 +41,7 @@ impl<K: Kernel> SMOSolver<K> {
         }
 
         let n = samples.len();
-        
+
         // Special case: single sample
         if n == 1 {
             let mut alpha = Array1::zeros(1);
@@ -58,11 +58,11 @@ impl<K: Kernel> SMOSolver<K> {
 
         // Initialize alpha values (all zeros initially)
         let mut alpha = Array1::zeros(n);
-        
+
         // Initialize error cache: E_i = output_i - y_i
         // Initially, output_i = 0 (since all alphas are 0), so E_i = -y_i
         let mut error_cache: Vec<f64> = samples.iter().map(|s| -s.label).collect();
-        
+
         let mut iterations = 0;
         let mut num_changed = 0;
         let mut examine_all = true;
@@ -70,7 +70,7 @@ impl<K: Kernel> SMOSolver<K> {
         // Main SMO loop
         while (num_changed > 0 || examine_all) && iterations < self.config.max_iterations {
             num_changed = 0;
-            
+
             if examine_all {
                 // Examine all samples
                 for i in 0..n {
@@ -88,24 +88,30 @@ impl<K: Kernel> SMOSolver<K> {
                     }
                 }
             }
-            
+
             if examine_all {
                 examine_all = false;
             } else if num_changed == 0 {
                 examine_all = true;
             }
-            
+
             iterations += 1;
         }
 
         // Calculate bias term
         let bias = self.calculate_bias(&alpha, &error_cache, samples)?;
-        
+
         // Find support vectors (where alpha > epsilon)
         let support_vectors: Vec<usize> = alpha
             .iter()
             .enumerate()
-            .filter_map(|(i, &a)| if a > self.config.epsilon { Some(i) } else { None })
+            .filter_map(|(i, &a)| {
+                if a > self.config.epsilon {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
             .collect();
 
         // Calculate objective value
@@ -131,16 +137,16 @@ impl<K: Kernel> SMOSolver<K> {
         let y_i = samples[i].label;
         let alpha_i = alpha[i];
         let e_i = error_cache[i];
-        
+
         // Check KKT conditions using the error value
         let r_i = e_i * y_i;
-        
+
         // KKT violation conditions:
         // - r_i < -epsilon and alpha_i < C (can increase alpha_i)
         // - r_i > epsilon and alpha_i > 0 (can decrease alpha_i)
-        if (r_i < -self.config.epsilon && alpha_i < self.config.c) ||
-           (r_i > self.config.epsilon && alpha_i > 0.0) {
-            
+        if (r_i < -self.config.epsilon && alpha_i < self.config.c)
+            || (r_i > self.config.epsilon && alpha_i > 0.0)
+        {
             // Try to find a second variable to optimize with
             if let Some(j) = self.select_second_variable(i, e_i, alpha, error_cache, samples)? {
                 if self.take_step(i, j, samples, alpha, error_cache)? {
@@ -148,7 +154,7 @@ impl<K: Kernel> SMOSolver<K> {
                 }
             }
         }
-        
+
         Ok(false)
     }
 
@@ -170,10 +176,10 @@ impl<K: Kernel> SMOSolver<K> {
             if j == i {
                 continue;
             }
-            
+
             let e_j = error_cache[j];
             let diff = (e_i - e_j).abs();
-            
+
             if diff > max_diff {
                 max_diff = diff;
                 best_j = Some(j);
@@ -202,9 +208,9 @@ impl<K: Kernel> SMOSolver<K> {
         let alpha_j_old = alpha[j];
         let e_i = error_cache[i];
         let e_j = error_cache[j];
-        
+
         let s = y_i * y_j;
-        
+
         // Calculate bounds L and H
         let (low, high) = if y_i != y_j {
             // Different signs
@@ -221,12 +227,18 @@ impl<K: Kernel> SMOSolver<K> {
         }
 
         // Calculate kernel values
-        let k_ii = self.kernel.compute(&samples[i].features, &samples[i].features);
-        let k_ij = self.kernel.compute(&samples[i].features, &samples[j].features);
-        let k_jj = self.kernel.compute(&samples[j].features, &samples[j].features);
-        
+        let k_ii = self
+            .kernel
+            .compute(&samples[i].features, &samples[i].features);
+        let k_ij = self
+            .kernel
+            .compute(&samples[i].features, &samples[j].features);
+        let k_jj = self
+            .kernel
+            .compute(&samples[j].features, &samples[j].features);
+
         let eta = k_ii + k_jj - 2.0 * k_ij;
-        
+
         let mut alpha_j_new = if eta > 0.0 {
             // Normal case: quadratic form is positive definite
             alpha_j_old + y_j * (e_i - e_j) / eta
@@ -246,7 +258,9 @@ impl<K: Kernel> SMOSolver<K> {
         };
 
         // Check for sufficient change
-        if (alpha_j_new - alpha_j_old).abs() < self.config.epsilon * (alpha_j_new + alpha_j_old + self.config.epsilon) {
+        if (alpha_j_new - alpha_j_old).abs()
+            < self.config.epsilon * (alpha_j_new + alpha_j_old + self.config.epsilon)
+        {
             return Ok(false);
         }
 
@@ -260,11 +274,15 @@ impl<K: Kernel> SMOSolver<K> {
         // Update error cache for all examples
         let delta_alpha_i = alpha_i_new - alpha_i_old;
         let delta_alpha_j = alpha_j_new - alpha_j_old;
-        
+
         for k in 0..samples.len() {
-            let k_ik = self.kernel.compute(&samples[i].features, &samples[k].features);
-            let k_jk = self.kernel.compute(&samples[j].features, &samples[k].features);
-            
+            let k_ik = self
+                .kernel
+                .compute(&samples[i].features, &samples[k].features);
+            let k_jk = self
+                .kernel
+                .compute(&samples[j].features, &samples[k].features);
+
             error_cache[k] += y_i * delta_alpha_i * k_ik + y_j * delta_alpha_j * k_jk;
         }
 
@@ -313,22 +331,24 @@ impl<K: Kernel> SMOSolver<K> {
     fn calculate_objective(&self, alpha: &Array1<f64>, samples: &[Sample]) -> Result<f64> {
         let mut obj = 0.0;
         let n = samples.len();
-        
+
         // Sum of alpha_i
         for i in 0..n {
             obj += alpha[i];
         }
-        
+
         // Subtract 0.5 * sum_i sum_j alpha_i * alpha_j * y_i * y_j * K(x_i, x_j)
         for i in 0..n {
             for j in 0..n {
                 if alpha[i] > 0.0 && alpha[j] > 0.0 {
-                    let k_ij = self.kernel.compute(&samples[i].features, &samples[j].features);
+                    let k_ij = self
+                        .kernel
+                        .compute(&samples[i].features, &samples[j].features);
                     obj -= 0.5 * alpha[i] * alpha[j] * samples[i].label * samples[j].label * k_ij;
                 }
             }
         }
-        
+
         Ok(obj)
     }
 }
@@ -336,7 +356,7 @@ impl<K: Kernel> SMOSolver<K> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{SparseVector, Sample};
+    use crate::core::{Sample, SparseVector};
     use crate::kernel::LinearKernel;
 
     #[test]
@@ -344,7 +364,7 @@ mod tests {
         let kernel = Arc::new(LinearKernel::new());
         let config = OptimizerConfig::default();
         let solver = SMOSolver::new(kernel, config);
-        
+
         // Basic creation test
         assert_eq!(solver.config.c, 1.0);
     }
@@ -354,10 +374,10 @@ mod tests {
         let kernel = Arc::new(LinearKernel::new());
         let config = OptimizerConfig::default();
         let solver = SMOSolver::new(kernel, config);
-        
+
         let samples = vec![];
         let result = solver.solve(&samples);
-        
+
         assert!(matches!(result, Err(SVMError::EmptyDataset)));
     }
 
@@ -366,11 +386,11 @@ mod tests {
         let kernel = Arc::new(LinearKernel::new());
         let config = OptimizerConfig::default();
         let solver = SMOSolver::new(kernel, config);
-        
+
         let samples = vec![
             Sample::new(SparseVector::new(vec![0], vec![1.0]), 0.5), // Invalid label
         ];
-        
+
         let result = solver.solve(&samples);
         assert!(matches!(result, Err(SVMError::InvalidLabel(0.5))));
     }
@@ -380,15 +400,15 @@ mod tests {
         let kernel = Arc::new(LinearKernel::new());
         let config = OptimizerConfig::default();
         let solver = SMOSolver::new(kernel, config);
-        
+
         // Simple case with valid labels
         let samples = vec![
             Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
             Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
         ];
-        
+
         let result = solver.solve(&samples).expect("Should solve successfully");
-        
+
         // Now that we have full implementation, check realistic results
         assert_eq!(result.alpha.len(), 2);
         // The algorithm should find some solution
@@ -403,9 +423,9 @@ mod tests {
         let mut config = OptimizerConfig::default();
         config.max_iterations = 1; // Force early termination
         config.epsilon = 0.00001; // Very tight tolerance to ensure it would need more iterations
-        
+
         let solver = SMOSolver::new(kernel, config);
-        
+
         // Create a problem that needs many iterations
         let samples = vec![
             Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), 1.0),
@@ -413,9 +433,9 @@ mod tests {
             Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), 1.0),
             Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), -1.0),
         ];
-        
+
         let result = solver.solve(&samples).expect("Should solve");
-        
+
         // Should hit max iterations
         assert_eq!(result.iterations, 1);
     }
@@ -426,9 +446,9 @@ mod tests {
         let mut config = OptimizerConfig::default();
         config.c = 10.0; // High C to ensure some alphas are not at bounds
         config.max_iterations = 5; // Limited iterations to test both paths
-        
+
         let solver = SMOSolver::new(kernel, config);
-        
+
         // XOR-like problem that's not linearly separable
         let samples = vec![
             Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), -1.0),
@@ -436,9 +456,9 @@ mod tests {
             Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), 1.0),
             Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), 1.0),
         ];
-        
+
         let result = solver.solve(&samples).expect("Should solve");
-        
+
         // Should complete within max iterations
         assert!(result.iterations <= 5);
     }
@@ -450,17 +470,17 @@ mod tests {
         config.max_iterations = 100;
         config.epsilon = 0.001;
         config.c = 1.0;
-        
+
         let solver = SMOSolver::new(kernel, config);
-        
+
         // Linearly separable case: positive points at (2,0), negative at (-2,0)
         let samples = vec![
             Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
             Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
         ];
-        
+
         let result = solver.solve(&samples).expect("Should solve successfully");
-        
+
         // For linearly separable case, we expect:
         // - Some alpha values should be > 0 (support vectors)
         // - Iterations should be > 0 when we implement the algorithm
@@ -474,14 +494,12 @@ mod tests {
         let kernel = Arc::new(LinearKernel::new());
         let config = OptimizerConfig::default();
         let solver = SMOSolver::new(kernel, config);
-        
+
         // Edge case: only one sample
-        let samples = vec![
-            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
-        ];
-        
+        let samples = vec![Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0)];
+
         let result = solver.solve(&samples).expect("Should handle single sample");
-        
+
         assert_eq!(result.alpha.len(), 1);
         // Single sample case should have specific behavior
     }

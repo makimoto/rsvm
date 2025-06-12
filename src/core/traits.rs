@@ -92,7 +92,7 @@ mod tests {
         ];
 
         let predictions = model.predict_batch(&samples);
-        
+
         assert_eq!(predictions.len(), 3);
         assert_eq!(predictions[0].label, 1.0);
         assert_eq!(predictions[0].decision_value, 1.0); // 1.0 * 1.0
