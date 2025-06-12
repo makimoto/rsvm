@@ -381,8 +381,8 @@ fn info_command(args: InfoArgs) -> Result<()> {
     println!("\nAlpha*Y values:");
     let alpha_y = &serializable_model.alpha_y;
     let n_show = alpha_y.len().min(10);
-    for i in 0..n_show {
-        println!("  α{}*y{}: {:.6}", i, i, alpha_y[i]);
+    for (i, &alpha_y_val) in alpha_y.iter().enumerate().take(n_show) {
+        println!("  α{}*y{}: {:.6}", i, i, alpha_y_val);
     }
     if alpha_y.len() > n_show {
         println!("  ... ({} more)", alpha_y.len() - n_show);
