@@ -82,7 +82,7 @@ impl SerializableModel {
     pub fn from_trained_model(model: &TrainedModel<LinearKernel>) -> Self {
         let info = model.info();
         let inner = model.inner();
-        
+
         let support_vectors: Vec<SerializableSample> = inner
             .support_vectors()
             .iter()
@@ -141,11 +141,7 @@ impl SerializableModel {
             ));
         }
 
-        let _support_vectors: Vec<Sample> = self
-            .support_vectors
-            .iter()
-            .map(Sample::from)
-            .collect();
+        let _support_vectors: Vec<Sample> = self.support_vectors.iter().map(Sample::from).collect();
 
         // Create a trained model using the internal constructor
         // This would require exposing more internals or creating a builder
@@ -166,7 +162,10 @@ impl SerializableModel {
         println!("Training Parameters:");
         println!("  C: {}", self.metadata.training_params.c);
         println!("  Epsilon: {}", self.metadata.training_params.epsilon);
-        println!("  Max Iterations: {}", self.metadata.training_params.max_iterations);
+        println!(
+            "  Max Iterations: {}",
+            self.metadata.training_params.max_iterations
+        );
     }
 }
 
@@ -178,10 +177,7 @@ mod tests {
 
     #[test]
     fn test_serializable_sample_conversion() {
-        let sample = Sample::new(
-            SparseVector::new(vec![0, 2, 5], vec![1.0, 2.0, 3.0]),
-            1.0,
-        );
+        let sample = Sample::new(SparseVector::new(vec![0, 2, 5], vec![1.0, 2.0, 3.0]), 1.0);
 
         let serializable = SerializableSample::from(&sample);
         assert_eq!(serializable.indices, vec![0, 2, 5]);
@@ -212,7 +208,10 @@ mod tests {
         let loaded = SerializableModel::load_from_file(temp_file.path())?;
 
         assert_eq!(loaded.kernel_type, "linear");
-        assert_eq!(loaded.support_vectors.len(), serializable.support_vectors.len());
+        assert_eq!(
+            loaded.support_vectors.len(),
+            serializable.support_vectors.len()
+        );
         assert_eq!(loaded.bias, serializable.bias);
 
         Ok(())

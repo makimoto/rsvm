@@ -133,10 +133,7 @@ pub mod parallel {
         model: &M,
         samples: &[Sample],
     ) -> Vec<crate::core::Prediction> {
-        samples
-            .iter()
-            .map(|sample| model.predict(sample))
-            .collect()
+        samples.iter().map(|sample| model.predict(sample)).collect()
     }
 }
 

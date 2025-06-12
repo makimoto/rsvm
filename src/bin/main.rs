@@ -186,7 +186,10 @@ fn main() {
 fn train_command(args: TrainArgs) -> Result<()> {
     info!("Training SVM model...");
     info!("Data file: {:?}", args.data);
-    info!("Parameters: C={}, epsilon={}, max_iter={}", args.c, args.epsilon, args.max_iterations);
+    info!(
+        "Parameters: C={}, epsilon={}, max_iter={}",
+        args.c, args.epsilon, args.max_iterations
+    );
 
     // Determine format
     let format = if args.format == "auto" {
@@ -215,7 +218,11 @@ fn train_command(args: TrainArgs) -> Result<()> {
 }
 
 fn train_with_dataset<D: Dataset>(args: &TrainArgs, dataset: D) -> Result<()> {
-    info!("Loaded {} samples with {} dimensions", dataset.len(), dataset.dim());
+    info!(
+        "Loaded {} samples with {} dimensions",
+        dataset.len(),
+        dataset.dim()
+    );
 
     // Validate dataset
     if dataset.len() < 2 {
@@ -233,7 +240,7 @@ fn train_with_dataset<D: Dataset>(args: &TrainArgs, dataset: D) -> Result<()> {
         .train(&dataset)?;
 
     info!("Training completed successfully");
-    
+
     let info = model.info();
     info!("Support vectors: {}", info.n_support_vectors);
     info!("Bias: {:.6}", info.bias);
@@ -255,7 +262,7 @@ fn predict_command(args: PredictArgs) -> Result<()> {
     let serializable_model = SerializableModel::load_from_file(&args.model)?;
 
     info!("Loading prediction data from: {:?}", args.data);
-    
+
     let format = if args.format == "auto" {
         detect_format(&args.data)
     } else {
@@ -271,21 +278,27 @@ fn predict_command(args: PredictArgs) -> Result<()> {
             let dataset = CSVDataset::from_file(&args.data)?;
             dataset.len()
         }
-        _ => return Err(rsvm::core::SVMError::InvalidParameter(format!(
-            "Unsupported format: {}",
-            format
-        ))),
+        _ => {
+            return Err(rsvm::core::SVMError::InvalidParameter(format!(
+                "Unsupported format: {}",
+                format
+            )))
+        }
     };
 
     // For now, we can't reconstruct the full model, so we'll show what we would do
     warn!("Model reconstruction not yet fully implemented");
-    warn!("Showing predictions that would be made with {} support vectors", 
-          serializable_model.metadata.n_support_vectors);
+    warn!(
+        "Showing predictions that would be made with {} support vectors",
+        serializable_model.metadata.n_support_vectors
+    );
 
     // Print prediction format that would be output
     println!("# Predictions for {} samples", dataset_len);
-    println!("# Format: sample_index predicted_label{}", 
-             if args.confidence { " confidence" } else { "" });
+    println!(
+        "# Format: sample_index predicted_label{}",
+        if args.confidence { " confidence" } else { "" }
+    );
 
     // Show sample predictions (dummy implementation)
     for i in 0..dataset_len.min(10) {
@@ -312,7 +325,7 @@ fn evaluate_command(args: EvaluateArgs) -> Result<()> {
     let serializable_model = SerializableModel::load_from_file(&args.model)?;
 
     info!("Loading test data from: {:?}", args.data);
-    
+
     let format = if args.format == "auto" {
         detect_format(&args.data)
     } else {
@@ -328,14 +341,19 @@ fn evaluate_command(args: EvaluateArgs) -> Result<()> {
             let dataset = CSVDataset::from_file(&args.data)?;
             (dataset.len(), dataset.dim(), dataset.get_labels())
         }
-        _ => return Err(rsvm::core::SVMError::InvalidParameter(format!(
-            "Unsupported format: {}",
-            format
-        ))),
+        _ => {
+            return Err(rsvm::core::SVMError::InvalidParameter(format!(
+                "Unsupported format: {}",
+                format
+            )))
+        }
     };
 
     warn!("Model reconstruction not yet fully implemented");
-    info!("Test dataset: {} samples, {} dimensions", dataset_len, dataset_dim);
+    info!(
+        "Test dataset: {} samples, {} dimensions",
+        dataset_len, dataset_dim
+    );
 
     // Show what evaluation would look like
     println!("=== Model Evaluation ===");
@@ -350,10 +368,15 @@ fn evaluate_command(args: EvaluateArgs) -> Result<()> {
 
     println!("  Positive samples: {}", pos_count);
     println!("  Negative samples: {}", neg_count);
-    println!("  Balance ratio: {:.2}", pos_count as f64 / neg_count as f64);
+    println!(
+        "  Balance ratio: {:.2}",
+        pos_count as f64 / neg_count as f64
+    );
 
     if args.detailed {
-        println!("\nDetailed metrics would be computed here once model reconstruction is implemented");
+        println!(
+            "\nDetailed metrics would be computed here once model reconstruction is implemented"
+        );
     }
 
     Ok(())
@@ -367,12 +390,15 @@ fn info_command(args: InfoArgs) -> Result<()> {
 
     println!("\nSupport Vector Details:");
     println!("  Total: {}", serializable_model.support_vectors.len());
-    
+
     if !serializable_model.support_vectors.is_empty() {
         let first_sv = &serializable_model.support_vectors[0];
         println!("  First SV dimensions: {}", first_sv.indices.len());
-        println!("  First SV indices: {:?}", &first_sv.indices[..first_sv.indices.len().min(5)]);
-        
+        println!(
+            "  First SV indices: {:?}",
+            &first_sv.indices[..first_sv.indices.len().min(5)]
+        );
+
         if first_sv.indices.len() > 5 {
             println!("    ... ({} more)", first_sv.indices.len() - 5);
         }
@@ -395,20 +421,20 @@ fn quick_command(args: QuickArgs) -> Result<()> {
     match args.operation {
         QuickOperation::Eval { train, test, c } => {
             info!("Quick evaluation: train on {:?}, test on {:?}", train, test);
-            
+
             let accuracy = quick::evaluate_split(&train, &test)?;
-            
+
             println!("=== Quick Evaluation Results ===");
             println!("Training file: {:?}", train);
             println!("Test file: {:?}", test);
             println!("C parameter: {}", c);
             println!("Test accuracy: {:.2}%", accuracy * 100.0);
-            
+
             Ok(())
         }
         QuickOperation::Cv { data, ratio, c } => {
             info!("Cross-validation on {:?} with ratio {}", data, ratio);
-            
+
             let format = detect_format(&data);
             let accuracy = match format.as_str() {
                 "libsvm" => {
@@ -419,23 +445,24 @@ fn quick_command(args: QuickArgs) -> Result<()> {
                     let dataset = CSVDataset::from_file(&data)?;
                     quick::simple_validation(&dataset, ratio, c)?
                 }
-                _ => return Err(rsvm::core::SVMError::InvalidParameter(format!(
-                    "Unsupported format: {}",
-                    format
-                ))),
+                _ => {
+                    return Err(rsvm::core::SVMError::InvalidParameter(format!(
+                        "Unsupported format: {}",
+                        format
+                    )))
+                }
             };
-            
+
             println!("=== Cross-Validation Results ===");
             println!("Data file: {:?}", data);
             println!("Train/test ratio: {:.1}/{:.1}", ratio, 1.0 - ratio);
             println!("C parameter: {}", c);
             println!("CV accuracy: {:.2}%", accuracy * 100.0);
-            
+
             Ok(())
         }
     }
 }
-
 
 fn detect_format(path: &Path) -> String {
     if let Some(ext) = path.extension() {
