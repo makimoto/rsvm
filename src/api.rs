@@ -462,4 +462,236 @@ mod tests {
             quick::simple_validation(&dataset, 0.7, 1.0).expect("Validation should succeed");
         assert!((0.0..=1.0).contains(&accuracy));
     }
+
+    #[test]
+    fn test_file_operation_errors() {
+        // Test I/O errors for train_from_file
+        let result = SVM::new().train_from_file("/nonexistent/path.libsvm");
+        assert!(result.is_err());
+
+        // Test I/O errors for train_from_csv
+        let result = SVM::new().train_from_csv("/nonexistent/path.csv");
+        assert!(result.is_err());
+
+        // Create a valid model first for predict/evaluate error tests
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+        let model = SVM::new()
+            .train_samples(&samples)
+            .expect("Training should succeed");
+
+        // Test I/O errors for predict_from_file
+        let result = model.predict_from_file("/nonexistent/path.libsvm");
+        assert!(result.is_err());
+
+        // Test I/O errors for predict_from_csv
+        let result = model.predict_from_csv("/nonexistent/path.csv");
+        assert!(result.is_err());
+
+        // Test I/O errors for evaluate_from_file
+        let result = model.evaluate_from_file("/nonexistent/path.libsvm");
+        assert!(result.is_err());
+
+        // Test I/O errors for evaluate_from_csv
+        let result = model.evaluate_from_csv("/nonexistent/path.csv");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_evaluation_metrics_edge_cases() {
+        // Test edge case: no true positives, no false positives (only true negatives)
+        // All samples are negative and correctly predicted
+        let metrics = EvaluationMetrics::new(0, 3, 0, 0); // tp=0, tn=3, fp=0, fn=0
+
+        // With no positives, precision should be 0.0 and recall should be 0.0
+        assert_eq!(metrics.precision(), 0.0);
+        assert_eq!(metrics.recall(), 0.0);
+        assert_eq!(metrics.f1_score(), 0.0);
+        assert_eq!(metrics.specificity(), 1.0); // All negatives correct
+
+        // Test edge case: no true negatives, no false negatives (only true positives)
+        // All samples are positive and correctly predicted
+        let metrics = EvaluationMetrics::new(3, 0, 0, 0); // tp=3, tn=0, fp=0, fn=0
+
+        assert_eq!(metrics.precision(), 1.0);
+        assert_eq!(metrics.recall(), 1.0);
+        assert_eq!(metrics.f1_score(), 1.0);
+        assert_eq!(metrics.specificity(), 0.0); // No negatives to be specific about
+
+        // Test edge case: no true positives (all false negatives and true/false negatives)
+        let metrics = EvaluationMetrics::new(0, 1, 1, 2); // tp=0, tn=1, fp=1, fn=2
+
+        assert_eq!(metrics.precision(), 0.0); // No true positives
+        assert_eq!(metrics.recall(), 0.0); // No true positives
+        assert_eq!(metrics.f1_score(), 0.0); // F1 is 0 when precision and recall are 0
+
+        // Test edge case: all false positives (no true positives or true negatives)
+        let metrics = EvaluationMetrics::new(0, 0, 3, 0); // tp=0, tn=0, fp=3, fn=0
+
+        assert_eq!(metrics.precision(), 0.0); // No true positives
+        assert_eq!(metrics.specificity(), 0.0); // No true negatives
+
+        // Test edge case: division by zero in accuracy with all zeros
+        let metrics = EvaluationMetrics::new(0, 0, 0, 0);
+        assert_eq!(metrics.accuracy(), 0.0);
+    }
+
+    #[test]
+    fn test_quick_module_functions() {
+        use std::io::Write;
+
+        // Test quick::train_csv
+        let mut csv_file = NamedTempFile::new().expect("Failed to create temp file");
+        writeln!(csv_file, "2.0,1").expect("Failed to write");
+        writeln!(csv_file, "-2.0,-1").expect("Failed to write");
+        csv_file.flush().expect("Failed to flush");
+
+        let model = quick::train_csv(csv_file.path()).expect("CSV training should succeed");
+        assert!(model.info().n_support_vectors > 0);
+
+        // Test quick::train_libsvm_with_c
+        let mut libsvm_file = NamedTempFile::new().expect("Failed to create temp file");
+        writeln!(libsvm_file, "+1 1:1.0").expect("Failed to write");
+        writeln!(libsvm_file, "-1 1:-1.0").expect("Failed to write");
+        libsvm_file.flush().expect("Failed to flush");
+
+        let model = quick::train_libsvm_with_c(libsvm_file.path(), 2.0)
+            .expect("LibSVM training with C should succeed");
+        assert!(model.info().n_support_vectors > 0);
+
+        // Test quick::evaluate_split
+        let accuracy = quick::evaluate_split(libsvm_file.path(), libsvm_file.path())
+            .expect("Evaluate split should succeed");
+        assert!((0.0..=1.0).contains(&accuracy));
+    }
+
+    #[test]
+    fn test_svm_with_kernel() {
+        use crate::kernel::LinearKernel;
+
+        let kernel = LinearKernel::new();
+        let svm = SVM::with_kernel(kernel);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let model = svm
+            .train_samples(&samples)
+            .expect("Training should succeed");
+        assert!(model.info().n_support_vectors > 0);
+    }
+
+    #[test]
+    fn test_svm_default() {
+        let svm = SVM::default();
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let model = svm
+            .train_samples(&samples)
+            .expect("Training should succeed");
+        assert!(model.info().n_support_vectors > 0);
+    }
+
+    #[test]
+    fn test_simple_validation_edge_cases() {
+        struct MockDataset {
+            samples: Vec<Sample>,
+        }
+
+        impl Dataset for MockDataset {
+            fn len(&self) -> usize {
+                self.samples.len()
+            }
+            fn dim(&self) -> usize {
+                1
+            }
+            fn get_sample(&self, i: usize) -> Sample {
+                self.samples[i].clone()
+            }
+            fn get_labels(&self) -> Vec<f64> {
+                self.samples.iter().map(|s| s.label).collect()
+            }
+        }
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+        let dataset = MockDataset { samples };
+
+        // Test invalid train_ratio (> 1.0)
+        let result = quick::simple_validation(&dataset, 1.5, 1.0);
+        assert!(result.is_err());
+
+        // Test invalid train_ratio (< 0.0)
+        let result = quick::simple_validation(&dataset, -0.1, 1.0);
+        assert!(result.is_err());
+
+        // Test invalid train_ratio (= 0.0) - should result in no training data
+        let result = quick::simple_validation(&dataset, 0.0, 1.0);
+        assert!(result.is_err());
+
+        // Test invalid train_ratio (= 1.0) - should result in no test data
+        let result = quick::simple_validation(&dataset, 1.0, 1.0);
+        assert!(result.is_err());
+
+        // Test very small dataset
+        let small_samples = vec![Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0)];
+        let small_dataset = MockDataset {
+            samples: small_samples,
+        };
+        let result = quick::simple_validation(&small_dataset, 0.5, 1.0);
+        assert!(result.is_err()); // Should fail with insufficient data
+    }
+
+    #[test]
+    fn test_evaluate_detailed_edge_cases() {
+        // Create mock dataset for evaluate_detailed
+        struct MockDataset {
+            samples: Vec<Sample>,
+        }
+
+        impl Dataset for MockDataset {
+            fn len(&self) -> usize {
+                self.samples.len()
+            }
+            fn dim(&self) -> usize {
+                1
+            }
+            fn get_sample(&self, i: usize) -> Sample {
+                self.samples[i].clone()
+            }
+            fn get_labels(&self) -> Vec<f64> {
+                self.samples.iter().map(|s| s.label).collect()
+            }
+        }
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let model = SVM::new()
+            .train_samples(&samples)
+            .expect("Training should succeed");
+
+        // Test with same training data (should get perfect results)
+        let dataset = MockDataset {
+            samples: samples.clone(),
+        };
+        let detailed = model.evaluate_detailed(&dataset);
+        assert_eq!(detailed.accuracy(), 1.0);
+        assert_eq!(detailed.true_positives, 1);
+        assert_eq!(detailed.true_negatives, 1);
+        assert_eq!(detailed.false_positives, 0);
+        assert_eq!(detailed.false_negatives, 0);
+    }
 }
