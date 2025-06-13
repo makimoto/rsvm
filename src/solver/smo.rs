@@ -260,7 +260,7 @@ impl<K: Kernel> SMOSolver<K> {
                 &alpha[..],
                 &error_cache[..],
                 samples,
-                &active_set,
+                active_set,
             )? {
                 if self.take_step(i, j, samples, alpha, error_cache)? {
                     return Ok(true);

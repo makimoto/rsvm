@@ -59,10 +59,7 @@ pub mod scaling {
                     .iter()
                     .zip(sample.features.values.iter())
                 {
-                    feature_values
-                        .entry(feature_idx)
-                        .or_insert_with(Vec::new)
-                        .push(value);
+                    feature_values.entry(feature_idx).or_default().push(value);
                 }
             }
 
