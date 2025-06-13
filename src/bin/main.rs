@@ -307,7 +307,7 @@ fn train_with_dataset<D: Dataset>(args: &TrainArgs, dataset: D) -> Result<()> {
 
     // Add feature scaling if specified
     if let Some(scaling_method) = &args.feature_scaling {
-        info!("Using feature scaling: {:?}", scaling_method);
+        info!("Using feature scaling: {scaling_method:?}");
         svm_builder = svm_builder.with_feature_scaling(scaling_method.clone().into());
     }
 
@@ -393,7 +393,7 @@ fn predict_command(args: PredictArgs) -> Result<()> {
             }
         }
 
-        info!("Predictions saved to: {:?}", output_path);
+        info!("Predictions saved to: {output_path:?}");
     } else {
         // Print to stdout
         println!("# Predictions for {} samples", predictions.len());
@@ -535,7 +535,7 @@ fn quick_command(args: QuickArgs) -> Result<()> {
             println!("Test file: {test:?}");
             println!("C parameter: {c}");
             if let Some(ref scaling) = feature_scaling {
-                println!("Feature scaling: {:?}", scaling);
+                println!("Feature scaling: {scaling:?}");
             }
             println!("Test accuracy: {:.2}%", accuracy * 100.0);
 
@@ -586,9 +586,9 @@ fn quick_command(args: QuickArgs) -> Result<()> {
             println!("Data file: {data:?}");
             println!("Train/test ratio: {ratio:.1}/{:.1}", 1.0 - ratio);
             println!("C parameter: {c}");
-            println!("Working set strategy: {:?}", strategy);
+            println!("Working set strategy: {strategy:?}");
             if let Some(ref scaling) = feature_scaling {
-                println!("Feature scaling: {:?}", scaling);
+                println!("Feature scaling: {scaling:?}");
             }
             println!("CV accuracy: {:.2}%", accuracy * 100.0);
 
