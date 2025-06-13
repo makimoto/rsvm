@@ -100,6 +100,27 @@ impl<K: Kernel> TrainedSVM<K> {
         }
     }
 
+    /// Create a trained SVM model from support vectors and alpha values
+    ///
+    /// This constructor is used for model reconstruction from saved models.
+    pub fn from_components(
+        kernel: Arc<K>,
+        support_vectors: Vec<Sample>,
+        alpha: Vec<f64>,
+        bias: f64,
+    ) -> Self {
+        // Generate sequential indices for reconstructed model
+        let support_indices: Vec<usize> = (0..support_vectors.len()).collect();
+
+        Self {
+            kernel,
+            support_vectors,
+            alpha,
+            bias,
+            support_indices,
+        }
+    }
+
     /// Get the decision function value for a sample
     pub fn decision_function(&self, sample: &Sample) -> f64 {
         let mut result = 0.0;
@@ -419,6 +440,70 @@ mod tests {
         assert_eq!(optimizer.config().epsilon, 0.01);
         assert_eq!(optimizer.config().max_iterations, 500);
         assert_eq!(optimizer.config().cache_size, 2048);
+    }
+
+    #[test]
+    fn test_trained_svm_from_components() {
+        let kernel = Arc::new(LinearKernel::new());
+
+        // Create support vectors manually
+        let support_vectors = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.0]), -1.0),
+        ];
+
+        let alpha = vec![0.5, 0.5];
+        let bias = 0.0;
+
+        let model = TrainedSVM::from_components(kernel, support_vectors, alpha, bias);
+
+        // Test basic properties
+        assert_eq!(model.n_support_vectors(), 2);
+        assert_eq!(model.alpha_values().len(), 2);
+        assert_eq!(model.alpha_values()[0], 0.5);
+        assert_eq!(model.alpha_values()[1], 0.5);
+        assert_eq!(model.bias(), 0.0);
+
+        // Test prediction
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0);
+        let prediction = model.predict(&test_sample);
+        assert!(prediction.label == 1.0 || prediction.label == -1.0);
+
+        // Test decision function
+        let decision = model.decision_function(&test_sample);
+        assert!(decision.is_finite());
+    }
+
+    #[test]
+    fn test_model_reconstruction_matches_original() {
+        let kernel = LinearKernel::new();
+        let optimizer = SVMOptimizer::with_kernel(kernel);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        // Train original model
+        let original_model = optimizer
+            .train_samples(&samples)
+            .expect("Training should succeed");
+
+        // Extract components and reconstruct
+        let reconstructed_model = TrainedSVM::from_components(
+            Arc::new(LinearKernel::new()),
+            original_model.support_vectors().to_vec(),
+            original_model.alpha_values().to_vec(),
+            original_model.bias(),
+        );
+
+        // Test that predictions match
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0);
+        let original_pred = original_model.predict(&test_sample);
+        let reconstructed_pred = reconstructed_model.predict(&test_sample);
+
+        assert_eq!(original_pred.label, reconstructed_pred.label);
+        assert!((original_pred.decision_value - reconstructed_pred.decision_value).abs() < 1e-10);
     }
 
     #[test]

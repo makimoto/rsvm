@@ -141,14 +141,27 @@ impl SerializableModel {
             ));
         }
 
-        let _support_vectors: Vec<Sample> = self.support_vectors.iter().map(Sample::from).collect();
+        let support_vectors: Vec<Sample> = self.support_vectors.iter().map(Sample::from).collect();
 
-        // Create a trained model using the internal constructor
-        // This would require exposing more internals or creating a builder
-        // For now, we'll return an error and implement this when needed
-        Err(SVMError::InvalidParameter(
-            "Model reconstruction not yet implemented".to_string(),
-        ))
+        // Reconstruct alpha values from alpha_y (alpha_i * y_i)
+        let alpha: Vec<f64> = self
+            .alpha_y
+            .iter()
+            .zip(support_vectors.iter())
+            .map(|(&alpha_y, sample)| alpha_y * sample.label) // alpha_i = (alpha_i * y_i) * y_i, since y_i^2 = 1
+            .collect();
+
+        // Create the trained SVM using the new constructor
+        use crate::optimizer::TrainedSVM;
+        use std::sync::Arc;
+        let inner_model = TrainedSVM::from_components(
+            Arc::new(LinearKernel::new()),
+            support_vectors,
+            alpha,
+            self.bias,
+        );
+
+        Ok(TrainedModel::from_trained_svm(inner_model))
     }
 
     /// Print model summary
@@ -282,22 +295,77 @@ mod tests {
     }
 
     #[test]
-    fn test_to_trained_model_not_implemented() {
+    fn test_to_trained_model_success() {
         let samples = vec![
             Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
             Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
         ];
 
-        let model = SVM::new().train_samples(&samples).unwrap();
-        let serializable = SerializableModel::from_trained_model(&model);
+        let original_model = SVM::new().train_samples(&samples).unwrap();
+        let serializable = SerializableModel::from_trained_model(&original_model);
 
-        // This should return not implemented error
-        let result = serializable.to_trained_model();
-        assert!(result.is_err());
-        if let Err(SVMError::InvalidParameter(msg)) = result {
-            assert!(msg.contains("not yet implemented"));
-        } else {
-            panic!("Expected InvalidParameter error");
+        // This should now succeed
+        let reconstructed_model = serializable
+            .to_trained_model()
+            .expect("Model reconstruction should succeed");
+
+        // Test that the reconstructed model makes the same predictions
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0);
+        let original_pred = original_model.predict(&test_sample);
+        let reconstructed_pred = reconstructed_model.predict(&test_sample);
+
+        // Labels should match
+        assert_eq!(original_pred.label, reconstructed_pred.label);
+
+        // Decision values should be very close (allowing for small numerical differences)
+        assert!((original_pred.decision_value - reconstructed_pred.decision_value).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_model_round_trip_reconstruction() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.5, 1.0]), 1.0),
+        ];
+
+        // Train original model
+        let original_model = SVM::new().train_samples(&samples).unwrap();
+
+        // Serialize and save
+        let serializable = SerializableModel::from_trained_model(&original_model);
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        serializable.save_to_file(temp_file.path()).unwrap();
+
+        // Load and reconstruct
+        let loaded_serializable = SerializableModel::load_from_file(temp_file.path()).unwrap();
+        let reconstructed_model = loaded_serializable
+            .to_trained_model()
+            .expect("Model reconstruction should succeed");
+
+        // Test multiple samples
+        let test_samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![0.5, 1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-0.5, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 0.5]), 1.0),
+        ];
+
+        for test_sample in &test_samples {
+            let original_pred = original_model.predict(test_sample);
+            let reconstructed_pred = reconstructed_model.predict(test_sample);
+
+            assert_eq!(
+                original_pred.label, reconstructed_pred.label,
+                "Prediction labels should match for sample {:?}",
+                test_sample
+            );
+            assert!(
+                (original_pred.decision_value - reconstructed_pred.decision_value).abs() < 1e-10,
+                "Decision values should be very close for sample {:?}: {} vs {}",
+                test_sample,
+                original_pred.decision_value,
+                reconstructed_pred.decision_value
+            );
         }
     }
 

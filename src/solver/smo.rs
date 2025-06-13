@@ -6,6 +6,7 @@
 use crate::cache::KernelCache;
 use crate::core::{OptimizationResult, OptimizerConfig, Result, SVMError, Sample};
 use crate::kernel::Kernel;
+use crate::solver::shrinking::ShrinkingStrategy;
 use std::sync::Arc;
 
 /// SMO solver for SVM optimization
@@ -96,30 +97,86 @@ impl<K: Kernel> SMOSolver<K> {
         // Initially, output_i = 0 (since all alphas are 0), so E_i = -y_i
         let mut error_cache: Vec<f64> = samples.iter().map(|s| -s.label).collect();
 
+        // Initialize shrinking strategy if enabled
+        let mut shrinking_strategy = if self.config.shrinking {
+            Some(ShrinkingStrategy::new(n, self.config.shrinking_iterations))
+        } else {
+            None
+        };
+
+        // Track active variables (not shrunk)
+        let mut active_set: Vec<usize> = (0..n).collect();
+
         let mut iterations = 0;
         let mut num_changed = 0;
         let mut examine_all = true;
+        let mut shrinking_counter = 0;
 
         // Main SMO loop
         while (num_changed > 0 || examine_all) && iterations < self.config.max_iterations {
             num_changed = 0;
 
             if examine_all {
-                // Examine all samples
-                for i in 0..n {
+                // Examine all active samples
+                for &i in &active_set {
                     if self.examine_example(i, samples, &mut alpha, &mut error_cache)? {
                         num_changed += 1;
                     }
                 }
             } else {
-                // Examine non-bound samples (0 < alpha < C)
-                for i in 0..n {
+                // Examine non-bound active samples (0 < alpha < C)
+                for &i in &active_set {
                     if alpha[i] > 0.0
                         && alpha[i] < self.config.c
                         && self.examine_example(i, samples, &mut alpha, &mut error_cache)?
                     {
                         num_changed += 1;
                     }
+                }
+            }
+
+            // Update shrinking strategy and apply shrinking periodically
+            if let Some(ref mut strategy) = shrinking_strategy {
+                strategy.update(&alpha, &error_cache, samples, self.config.c);
+
+                shrinking_counter += 1;
+                if shrinking_counter >= self.config.shrinking_iterations
+                    && strategy.has_sufficient_history()
+                {
+                    let (shrink_to_lower, shrink_to_upper) = strategy.get_shrinkable_variables();
+
+                    // Apply shrinking: remove variables from active set
+                    if !shrink_to_lower.is_empty() || !shrink_to_upper.is_empty() {
+                        let mut shrunk_count = 0;
+
+                        // Remove variables that should be shrunk to bounds
+                        active_set.retain(|&i| {
+                            let should_shrink =
+                                shrink_to_lower.contains(&i) || shrink_to_upper.contains(&i);
+                            if should_shrink {
+                                // Fix variables at their bounds
+                                if shrink_to_lower.contains(&i) {
+                                    alpha[i] = 0.0;
+                                } else if shrink_to_upper.contains(&i) {
+                                    alpha[i] = self.config.c;
+                                }
+                                shrunk_count += 1;
+                            }
+                            !should_shrink
+                        });
+
+                        if shrunk_count > 0 {
+                            // Update error cache for remaining variables after shrinking
+                            self.update_error_cache_after_shrinking(
+                                &mut error_cache,
+                                &alpha,
+                                samples,
+                                &active_set,
+                            )?;
+                        }
+                    }
+
+                    shrinking_counter = 0;
                 }
             }
 
@@ -384,6 +441,43 @@ impl<K: Kernel> SMOSolver<K> {
         }
 
         Ok(obj)
+    }
+
+    /// Update error cache after shrinking variables
+    ///
+    /// When variables are shrunk (fixed at bounds), we need to update
+    /// the error cache for remaining active variables to reflect the
+    /// contribution of the newly fixed variables.
+    fn update_error_cache_after_shrinking(
+        &self,
+        error_cache: &mut [f64],
+        alpha: &[f64],
+        samples: &[Sample],
+        active_set: &[usize],
+    ) -> Result<()> {
+        // Recompute error cache for active variables
+        // E_i = Σⱼ αⱼ yⱼ K(xᵢ,xⱼ) + b - yᵢ
+        // We'll approximate by recomputing from scratch for active variables
+
+        for &i in active_set {
+            let mut output = 0.0;
+
+            // Sum over all variables (including shrunk ones)
+            for j in 0..samples.len() {
+                if alpha[j] > 1e-12 {
+                    let k_ij = self
+                        .kernel
+                        .compute(&samples[i].features, &samples[j].features);
+                    output += alpha[j] * samples[j].label * k_ij;
+                }
+            }
+
+            // Update error: E_i = output_i - y_i
+            // Note: we're not adding bias here since it will be computed later
+            error_cache[i] = output - samples[i].label;
+        }
+
+        Ok(())
     }
 }
 
@@ -725,5 +819,79 @@ mod tests {
         let result = solver.solve(&samples).expect("Should solve");
         // High tolerance should lead to quick convergence with few iterations
         assert!(result.iterations <= 3);
+    }
+
+    #[test]
+    fn test_shrinking_enabled() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.shrinking = true;
+        config.shrinking_iterations = 5; // Shrink every 5 iterations
+        config.max_iterations = 50;
+
+        let solver = SMOSolver::new(kernel, config);
+
+        // Create a larger dataset to test shrinking effectiveness
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.9]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.8]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.9]), -1.0),
+        ];
+
+        let result = solver.solve(&samples).expect("Should solve with shrinking");
+
+        // Should find solution
+        assert!(result.support_vectors.len() > 0);
+        assert!(result.iterations > 0);
+
+        // Should have valid objective value
+        assert!(result.objective_value.is_finite());
+    }
+
+    #[test]
+    fn test_shrinking_vs_no_shrinking() {
+        let kernel = Arc::new(LinearKernel::new());
+
+        // Test without shrinking
+        let mut config_no_shrinking = OptimizerConfig::default();
+        config_no_shrinking.shrinking = false;
+        config_no_shrinking.max_iterations = 100;
+        let solver_no_shrinking = SMOSolver::new(kernel.clone(), config_no_shrinking);
+
+        // Test with shrinking
+        let mut config_with_shrinking = OptimizerConfig::default();
+        config_with_shrinking.shrinking = true;
+        config_with_shrinking.shrinking_iterations = 10;
+        config_with_shrinking.max_iterations = 100;
+        let solver_with_shrinking = SMOSolver::new(kernel, config_with_shrinking);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![3.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-3.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.5]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.8]), -1.0),
+        ];
+
+        let result_no_shrinking = solver_no_shrinking.solve(&samples).expect("Should solve");
+        let result_with_shrinking = solver_with_shrinking.solve(&samples).expect("Should solve");
+
+        // Both should converge to similar solutions
+        assert!(result_no_shrinking.support_vectors.len() > 0);
+        assert!(result_with_shrinking.support_vectors.len() > 0);
+
+        // Objective values should be close
+        let obj_diff =
+            (result_no_shrinking.objective_value - result_with_shrinking.objective_value).abs();
+        assert!(
+            obj_diff < 0.1,
+            "Objective values should be similar: {} vs {}",
+            result_no_shrinking.objective_value,
+            result_with_shrinking.objective_value
+        );
     }
 }

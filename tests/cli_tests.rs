@@ -339,7 +339,7 @@ fn test_cli_evaluate_command() {
 
     let stdout = String::from_utf8_lossy(&eval_output.stdout);
     assert!(stdout.contains("Model Evaluation"));
-    assert!(stdout.contains("Test Dataset"));
+    assert!(stdout.contains("Test Results"));
 }
 
 #[test]
@@ -378,7 +378,7 @@ fn test_cli_evaluate_detailed() {
     assert!(eval_output.status.success());
 
     let stdout = String::from_utf8_lossy(&eval_output.stdout);
-    assert!(stdout.contains("Detailed metrics"));
+    assert!(stdout.contains("Detailed Metrics"));
 }
 
 #[test]

@@ -259,6 +259,7 @@ fn train_with_dataset<D: Dataset>(args: &TrainArgs, dataset: D) -> Result<()> {
 fn predict_command(args: PredictArgs) -> Result<()> {
     info!("Loading model from: {:?}", args.model);
     let serializable_model = SerializableModel::load_from_file(&args.model)?;
+    let model = serializable_model.to_trained_model()?;
 
     info!("Loading prediction data from: {:?}", args.data);
 
@@ -268,14 +269,19 @@ fn predict_command(args: PredictArgs) -> Result<()> {
         args.format.clone()
     };
 
-    let dataset_len = match format.as_str() {
+    info!(
+        "Making predictions using model with {} support vectors",
+        serializable_model.metadata.n_support_vectors
+    );
+
+    let predictions = match format.as_str() {
         "libsvm" => {
             let dataset = LibSVMDataset::from_file(&args.data)?;
-            dataset.len()
+            model.predict_dataset(&dataset)
         }
         "csv" => {
             let dataset = CSVDataset::from_file(&args.data)?;
-            dataset.len()
+            model.predict_dataset(&dataset)
         }
         _ => {
             return Err(rsvm::core::SVMError::InvalidParameter(format!(
@@ -284,35 +290,50 @@ fn predict_command(args: PredictArgs) -> Result<()> {
         }
     };
 
-    // For now, we can't reconstruct the full model, so we'll show what we would do
-    warn!("Model reconstruction not yet fully implemented");
-    warn!(
-        "Showing predictions that would be made with {} support vectors",
-        serializable_model.metadata.n_support_vectors
-    );
+    // Output results
+    if let Some(output_path) = args.output {
+        // Write to file
+        use std::fs::File;
+        use std::io::{BufWriter, Write};
 
-    // Print prediction format that would be output
-    println!("# Predictions for {dataset_len} samples");
-    println!(
-        "# Format: sample_index predicted_label{}",
-        if args.confidence { " confidence" } else { "" }
-    );
+        let file = File::create(&output_path).map_err(rsvm::core::SVMError::IoError)?;
+        let mut writer = BufWriter::new(file);
 
-    // Show sample predictions (dummy implementation)
-    for i in 0..dataset_len.min(10) {
-        // For demo purposes, make a dummy prediction
-        let dummy_prediction = if i % 2 == 0 { 1.0 } else { -1.0 };
-        let dummy_confidence = 0.8;
+        writeln!(writer, "# Predictions for {} samples", predictions.len())
+            .map_err(rsvm::core::SVMError::IoError)?;
+        writeln!(
+            writer,
+            "# Format: sample_index predicted_label{}",
+            if args.confidence { " confidence" } else { "" }
+        )
+        .map_err(rsvm::core::SVMError::IoError)?;
 
-        if args.confidence {
-            println!("{i} {dummy_prediction:.0} {dummy_confidence:.3}");
-        } else {
-            println!("{i} {dummy_prediction:.0}");
+        for (i, pred) in predictions.iter().enumerate() {
+            if args.confidence {
+                writeln!(writer, "{} {:.0} {:.6}", i, pred.label, pred.confidence())
+                    .map_err(rsvm::core::SVMError::IoError)?;
+            } else {
+                writeln!(writer, "{} {:.0}", i, pred.label)
+                    .map_err(rsvm::core::SVMError::IoError)?;
+            }
         }
-    }
 
-    if dataset_len > 10 {
-        println!("... ({} more samples)", dataset_len - 10);
+        info!("Predictions saved to: {:?}", output_path);
+    } else {
+        // Print to stdout
+        println!("# Predictions for {} samples", predictions.len());
+        println!(
+            "# Format: sample_index predicted_label{}",
+            if args.confidence { " confidence" } else { "" }
+        );
+
+        for (i, pred) in predictions.iter().enumerate() {
+            if args.confidence {
+                println!("{} {:.0} {:.6}", i, pred.label, pred.confidence());
+            } else {
+                println!("{} {:.0}", i, pred.label);
+            }
+        }
     }
 
     Ok(())
@@ -321,6 +342,7 @@ fn predict_command(args: PredictArgs) -> Result<()> {
 fn evaluate_command(args: EvaluateArgs) -> Result<()> {
     info!("Loading model from: {:?}", args.model);
     let serializable_model = SerializableModel::load_from_file(&args.model)?;
+    let model = serializable_model.to_trained_model()?;
 
     info!("Loading test data from: {:?}", args.data);
 
@@ -330,14 +352,31 @@ fn evaluate_command(args: EvaluateArgs) -> Result<()> {
         args.format.clone()
     };
 
-    let (dataset_len, dataset_dim, labels) = match format.as_str() {
+    info!(
+        "Evaluating model with {} support vectors",
+        serializable_model.metadata.n_support_vectors
+    );
+
+    let (accuracy, detailed_metrics) = match format.as_str() {
         "libsvm" => {
             let dataset = LibSVMDataset::from_file(&args.data)?;
-            (dataset.len(), dataset.dim(), dataset.get_labels())
+            let accuracy = model.evaluate(&dataset);
+            let detailed = if args.detailed {
+                Some(model.evaluate_detailed(&dataset))
+            } else {
+                None
+            };
+            (accuracy, detailed)
         }
         "csv" => {
             let dataset = CSVDataset::from_file(&args.data)?;
-            (dataset.len(), dataset.dim(), dataset.get_labels())
+            let accuracy = model.evaluate(&dataset);
+            let detailed = if args.detailed {
+                Some(model.evaluate_detailed(&dataset))
+            } else {
+                None
+            };
+            (accuracy, detailed)
         }
         _ => {
             return Err(rsvm::core::SVMError::InvalidParameter(format!(
@@ -346,31 +385,23 @@ fn evaluate_command(args: EvaluateArgs) -> Result<()> {
         }
     };
 
-    warn!("Model reconstruction not yet fully implemented");
-    info!("Test dataset: {dataset_len} samples, {dataset_dim} dimensions");
-
-    // Show what evaluation would look like
+    // Show evaluation results
     println!("=== Model Evaluation ===");
     serializable_model.print_summary();
-    println!("\nTest Dataset:");
-    println!("  Samples: {dataset_len}");
-    println!("  Dimensions: {dataset_dim}");
 
-    // For demo, compute some basic dataset statistics
-    let pos_count = labels.iter().filter(|&&l| l > 0.0).count();
-    let neg_count = labels.len() - pos_count;
+    println!("\nTest Results:");
+    println!("  Accuracy: {:.2}%", accuracy * 100.0);
 
-    println!("  Positive samples: {pos_count}");
-    println!("  Negative samples: {neg_count}");
-    println!(
-        "  Balance ratio: {:.2}",
-        pos_count as f64 / neg_count as f64
-    );
-
-    if args.detailed {
-        println!(
-            "\nDetailed metrics would be computed here once model reconstruction is implemented"
-        );
+    if let Some(metrics) = detailed_metrics {
+        println!("\nDetailed Metrics:");
+        println!("  True Positives:  {}", metrics.true_positives);
+        println!("  True Negatives:  {}", metrics.true_negatives);
+        println!("  False Positives: {}", metrics.false_positives);
+        println!("  False Negatives: {}", metrics.false_negatives);
+        println!("  Precision:       {:.4}", metrics.precision());
+        println!("  Recall:          {:.4}", metrics.recall());
+        println!("  F1 Score:        {:.4}", metrics.f1_score());
+        println!("  Specificity:     {:.4}", metrics.specificity());
     }
 
     Ok(())

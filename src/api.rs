@@ -83,6 +83,26 @@ impl<K: Kernel> SVM<K> {
         self
     }
 
+    /// Enable or disable shrinking heuristic
+    ///
+    /// Shrinking can significantly improve performance on large datasets
+    /// by temporarily removing variables that are likely to remain at bounds.
+    /// Based on Section 4 of the SVMlight paper.
+    pub fn with_shrinking(mut self, enable_shrinking: bool) -> Self {
+        self.config.shrinking = enable_shrinking;
+        self
+    }
+
+    /// Set shrinking frequency (number of iterations between shrinking checks)
+    ///
+    /// Lower values check more frequently but may add overhead.
+    /// Higher values check less frequently but may miss opportunities.
+    /// Default is 100 iterations (h parameter in the paper).
+    pub fn with_shrinking_iterations(mut self, iterations: usize) -> Self {
+        self.config.shrinking_iterations = iterations;
+        self
+    }
+
     /// Train on a dataset
     pub fn train<D: Dataset>(self, dataset: &D) -> Result<TrainedModel<K>> {
         let optimizer = SVMOptimizer::new(self.kernel, self.config);
@@ -116,6 +136,11 @@ pub struct TrainedModel<K: Kernel> {
 }
 
 impl<K: Kernel> TrainedModel<K> {
+    /// Create a TrainedModel from a TrainedSVM
+    pub fn from_trained_svm(model: TrainedSVM<K>) -> Self {
+        Self { model }
+    }
+
     /// Predict a single sample
     pub fn predict(&self, sample: &Sample) -> Prediction {
         self.model.predict(sample)
@@ -693,5 +718,40 @@ mod tests {
         assert_eq!(detailed.true_negatives, 1);
         assert_eq!(detailed.false_positives, 0);
         assert_eq!(detailed.false_negatives, 0);
+    }
+
+    #[test]
+    fn test_shrinking_api() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.8]), -1.0),
+        ];
+
+        // Test with shrinking enabled
+        let model_with_shrinking = SVM::new()
+            .with_shrinking(true)
+            .with_shrinking_iterations(5)
+            .train_samples(&samples)
+            .expect("Training with shrinking should succeed");
+
+        // Test with shrinking disabled
+        let model_without_shrinking = SVM::new()
+            .with_shrinking(false)
+            .train_samples(&samples)
+            .expect("Training without shrinking should succeed");
+
+        // Both should produce valid models
+        assert!(model_with_shrinking.info().n_support_vectors > 0);
+        assert!(model_without_shrinking.info().n_support_vectors > 0);
+
+        // Test predictions should be similar
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0);
+        let pred_with = model_with_shrinking.predict(&test_sample);
+        let pred_without = model_without_shrinking.predict(&test_sample);
+
+        // Labels should be the same
+        assert_eq!(pred_with.label, pred_without.label);
     }
 }

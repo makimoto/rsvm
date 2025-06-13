@@ -145,7 +145,7 @@ impl Default for OptimizerConfig {
             max_iterations: 10000,
             working_set_size: 2,
             cache_size: 100_000_000, // 100MB
-            shrinking: false,        // Start without shrinking for simplicity
+            shrinking: true,         // Enable shrinking by default for better performance
             shrinking_iterations: 100,
         }
     }
@@ -211,7 +211,7 @@ mod tests {
         assert_eq!(config.max_iterations, 10000);
         assert_eq!(config.working_set_size, 2);
         assert_eq!(config.cache_size, 100_000_000);
-        assert!(!config.shrinking);
+        assert!(config.shrinking);
         assert_eq!(config.shrinking_iterations, 100);
     }
 
