@@ -601,14 +601,23 @@ fn iris_classification_example() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 1. Data Preprocessing
 
+**Note**: RSVM currently does not provide built-in scaling functions. Users must preprocess data externally.
+
 ```rust
-// For better numerical stability, normalize your features
-fn normalize_features(samples: &mut [Sample]) {
-    // Find min/max for each feature
+// Example: User-implemented normalization function
+// (This is NOT part of the RSVM API - you need to implement this yourself)
+fn normalize_features_user_implementation(samples: &mut [Sample]) {
+    // Find min/max for each feature across all samples
     // Apply min-max normalization: (x - min) / (max - min)
-    // Implementation depends on your specific data
+    // Consider using external libraries like numpy/pandas via Python,
+    // or implement custom scaling logic in Rust
 }
 ```
+
+**Recommended approach**: Use external tools for data preprocessing:
+- Python: scikit-learn's `MinMaxScaler` or `StandardScaler`
+- R: `scale()` function
+- Manual preprocessing before loading into RSVM
 
 ### 2. Sparse Data
 
