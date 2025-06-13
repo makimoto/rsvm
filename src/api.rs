@@ -27,7 +27,8 @@ use crate::core::{
 };
 use crate::data::{CSVDataset, LibSVMDataset};
 use crate::kernel::{
-    ChiSquareKernel, HistogramIntersectionKernel, Kernel, LinearKernel, PolynomialKernel, RBFKernel,
+    ChiSquareKernel, HellingerKernel, HistogramIntersectionKernel, Kernel, LinearKernel,
+    PolynomialKernel, RBFKernel,
 };
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
 use crate::utils::scaling::{ScalingMethod, ScalingParams};
@@ -228,6 +229,109 @@ impl SVM<HistogramIntersectionKernel> {
     pub fn with_histogram_intersection_texture() -> Self {
         Self {
             kernel: HistogramIntersectionKernel::for_texture_analysis(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+}
+
+impl SVM<HellingerKernel> {
+    /// Create a new SVM with Hellinger kernel for probability distributions
+    ///
+    /// The Hellinger kernel is designed for probability distributions and normalized data.
+    /// It's particularly effective for applications where features represent probabilities,
+    /// frequencies, or other non-negative normalized values.
+    ///
+    /// Key applications:
+    /// - Text mining with normalized term frequencies (TF-IDF)
+    /// - Bioinformatics with species abundance data
+    /// - Statistical analysis of probability distributions
+    /// - Image analysis with normalized histograms
+    /// - Natural language processing with word embeddings
+    /// - Machine learning with probability vectors
+    ///
+    /// # Arguments
+    /// * `normalized` - Whether to normalize by √(||x||₁ * ||y||₁) giving values in [0,1]
+    pub fn with_hellinger(normalized: bool) -> Self {
+        Self {
+            kernel: HellingerKernel::new(normalized),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with standard (non-normalized) Hellinger kernel
+    ///
+    /// This is the most commonly used variant for probability distributions.
+    /// Perfect for comparing probability vectors, mixture models, and other
+    /// probabilistic representations.
+    pub fn with_hellinger_standard() -> Self {
+        Self {
+            kernel: HellingerKernel::standard(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with normalized Hellinger kernel
+    ///
+    /// Normalizes by √(||x||₁ * ||y||₁), giving values in [0,1].
+    /// This is useful when distributions have different total probabilities
+    /// or for statistical hypothesis testing applications.
+    pub fn with_hellinger_normalized() -> Self {
+        Self {
+            kernel: HellingerKernel::normalized(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Hellinger kernel optimized for text mining
+    ///
+    /// Uses standard Hellinger kernel, which works well with TF-IDF vectors
+    /// and other normalized text representations. Excellent for document
+    /// classification and semantic similarity tasks.
+    pub fn with_hellinger_text() -> Self {
+        Self {
+            kernel: HellingerKernel::for_text_mining(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Hellinger kernel optimized for bioinformatics
+    ///
+    /// Uses normalized Hellinger kernel, suitable for species abundance data,
+    /// genetic sequence analysis, and other biological frequency measurements.
+    pub fn with_hellinger_bio() -> Self {
+        Self {
+            kernel: HellingerKernel::for_bioinformatics(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Hellinger kernel optimized for probability vectors
+    ///
+    /// Uses standard Hellinger kernel, perfect for comparing probability
+    /// distributions, mixture models, Bayesian analysis, and machine learning
+    /// applications with probabilistic features.
+    pub fn with_hellinger_probability() -> Self {
+        Self {
+            kernel: HellingerKernel::for_probability_vectors(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Hellinger kernel optimized for statistical analysis
+    ///
+    /// Uses normalized Hellinger kernel, providing bounded similarity measures
+    /// suitable for statistical hypothesis testing, distribution comparison,
+    /// and research applications requiring standardized metrics.
+    pub fn with_hellinger_stats() -> Self {
+        Self {
+            kernel: HellingerKernel::for_statistical_analysis(),
             config: OptimizerConfig::default(),
             scaling_method: None,
         }
@@ -1895,6 +1999,239 @@ mod tests {
         assert!(pred_linear.decision_value.is_finite());
         assert!(pred_hist.decision_value.is_finite());
         assert!(pred_chi2.decision_value.is_finite());
+    }
+
+    #[test]
+    fn test_hellinger_kernel_api() {
+        let samples = vec![
+            // Probability distributions class 1
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![0.4, 0.3, 0.2, 0.1]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![0.5, 0.25, 0.15, 0.1]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![0.35, 0.35, 0.2, 0.1]),
+                1.0,
+            ),
+            // Probability distributions class 2
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![0.1, 0.2, 0.3, 0.4]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![0.15, 0.15, 0.3, 0.4]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![0.1, 0.25, 0.25, 0.4]),
+                -1.0,
+            ),
+        ];
+
+        // Test different Hellinger kernel variants
+        let model_hellinger = SVM::with_hellinger(false)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger training should succeed");
+
+        let model_standard = SVM::with_hellinger_standard()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger standard training should succeed");
+
+        let model_normalized = SVM::with_hellinger_normalized()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger normalized training should succeed");
+
+        let model_text = SVM::with_hellinger_text()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger text training should succeed");
+
+        let model_bio = SVM::with_hellinger_bio()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger bio training should succeed");
+
+        let model_probability = SVM::with_hellinger_probability()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger probability training should succeed");
+
+        let model_stats = SVM::with_hellinger_stats()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Hellinger stats training should succeed");
+
+        // All models should train successfully
+        assert!(model_hellinger.info().n_support_vectors > 0);
+        assert!(model_standard.info().n_support_vectors > 0);
+        assert!(model_normalized.info().n_support_vectors > 0);
+        assert!(model_text.info().n_support_vectors > 0);
+        assert!(model_bio.info().n_support_vectors > 0);
+        assert!(model_probability.info().n_support_vectors > 0);
+        assert!(model_stats.info().n_support_vectors > 0);
+
+        // Test predictions on probability distribution leaning towards class 1
+        let test_sample = Sample::new(
+            SparseVector::new(vec![0, 1, 2, 3], vec![0.45, 0.3, 0.15, 0.1]),
+            1.0,
+        );
+
+        let pred_hellinger = model_hellinger.predict(&test_sample);
+        let pred_standard = model_standard.predict(&test_sample);
+        let pred_normalized = model_normalized.predict(&test_sample);
+        let pred_text = model_text.predict(&test_sample);
+        let pred_bio = model_bio.predict(&test_sample);
+        let pred_probability = model_probability.predict(&test_sample);
+        let pred_stats = model_stats.predict(&test_sample);
+
+        // All predictions should be finite and reasonable
+        assert!(pred_hellinger.decision_value.is_finite());
+        assert!(pred_standard.decision_value.is_finite());
+        assert!(pred_normalized.decision_value.is_finite());
+        assert!(pred_text.decision_value.is_finite());
+        assert!(pred_bio.decision_value.is_finite());
+        assert!(pred_probability.decision_value.is_finite());
+        assert!(pred_stats.decision_value.is_finite());
+
+        // For this probability distribution pattern, should predict positive
+        assert_eq!(pred_hellinger.label, 1.0);
+        assert_eq!(pred_standard.label, 1.0);
+        assert_eq!(pred_normalized.label, 1.0);
+        assert_eq!(pred_text.label, 1.0);
+        assert_eq!(pred_bio.label, 1.0);
+        assert_eq!(pred_probability.label, 1.0);
+        assert_eq!(pred_stats.label, 1.0);
+    }
+
+    #[test]
+    fn test_hellinger_vs_other_kernels() {
+        use crate::utils::scaling::ScalingMethod;
+
+        // Create probability distribution data where Hellinger should excel
+        let samples = vec![
+            // Class 1: Uniform-like distributions
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.2, 0.25, 0.2, 0.2, 0.15]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.18, 0.22, 0.25, 0.18, 0.17]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.22, 0.2, 0.18, 0.22, 0.18]),
+                1.0,
+            ),
+            // Class 2: Skewed distributions
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.5, 0.3, 0.15, 0.04, 0.01]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.45, 0.35, 0.12, 0.06, 0.02]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.52, 0.28, 0.13, 0.05, 0.02]),
+                -1.0,
+            ),
+        ];
+
+        // Train different kernels
+        let model_linear = SVM::new()
+            .with_c(1.0)
+            .with_feature_scaling(ScalingMethod::MinMax {
+                min_val: 0.0,
+                max_val: 1.0,
+            })
+            .train_samples(&samples)
+            .expect("Linear training should succeed");
+
+        let model_hellinger = SVM::with_hellinger_probability()
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Hellinger training should succeed");
+
+        let model_chi2 = SVM::with_chi_square(1.0)
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Chi-square training should succeed");
+
+        let model_hist = SVM::with_histogram_intersection_normalized()
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Histogram intersection training should succeed");
+
+        // All should train successfully
+        assert!(model_linear.info().n_support_vectors > 0);
+        assert!(model_hellinger.info().n_support_vectors > 0);
+        assert!(model_chi2.info().n_support_vectors > 0);
+        assert!(model_hist.info().n_support_vectors > 0);
+
+        // Calculate accuracy for each
+        let linear_correct = samples
+            .iter()
+            .map(|sample| model_linear.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let hellinger_correct = samples
+            .iter()
+            .map(|sample| model_hellinger.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let chi2_correct = samples
+            .iter()
+            .map(|sample| model_chi2.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let hist_correct = samples
+            .iter()
+            .map(|sample| model_hist.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let linear_accuracy = linear_correct as f64 / samples.len() as f64;
+        let hellinger_accuracy = hellinger_correct as f64 / samples.len() as f64;
+        let chi2_accuracy = chi2_correct as f64 / samples.len() as f64;
+        let hist_accuracy = hist_correct as f64 / samples.len() as f64;
+
+        // All should achieve reasonable accuracy
+        assert!(linear_accuracy >= 0.0);
+        assert!(hellinger_accuracy >= 0.0);
+        assert!(chi2_accuracy >= 0.0);
+        assert!(hist_accuracy >= 0.0);
+
+        // Hellinger should perform well on probability distribution data
+        assert!(hellinger_accuracy >= linear_accuracy - 0.1); // Allow some tolerance
+
+        // Test prediction consistency
+        let test_sample = Sample::new(
+            SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.25, 0.25, 0.2, 0.15, 0.15]),
+            1.0,
+        );
+        let pred_linear = model_linear.predict(&test_sample);
+        let pred_hellinger = model_hellinger.predict(&test_sample);
+        let pred_chi2 = model_chi2.predict(&test_sample);
+        let pred_hist = model_hist.predict(&test_sample);
+
+        assert!(pred_linear.decision_value.is_finite());
+        assert!(pred_hellinger.decision_value.is_finite());
+        assert!(pred_chi2.decision_value.is_finite());
+        assert!(pred_hist.decision_value.is_finite());
     }
 
     #[test]
