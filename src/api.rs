@@ -406,7 +406,23 @@ pub mod quick {
         train_path: P1,
         test_path: P2,
     ) -> Result<f64> {
-        let model = train_libsvm(train_path)?;
+        evaluate_split_with_params(train_path, test_path, 1.0, None)
+    }
+
+    /// Quick evaluation with custom parameters and scaling
+    pub fn evaluate_split_with_params<P1: AsRef<Path>, P2: AsRef<Path>>(
+        train_path: P1,
+        test_path: P2,
+        c: f64,
+        scaling: Option<ScalingMethod>,
+    ) -> Result<f64> {
+        let mut svm_builder = SVM::new().with_c(c);
+
+        if let Some(method) = scaling {
+            svm_builder = svm_builder.with_feature_scaling(method);
+        }
+
+        let model = svm_builder.train_from_file(train_path)?;
         model.evaluate_from_file(test_path)
     }
 
@@ -422,6 +438,17 @@ pub mod quick {
         c: f64,
         strategy: WorkingSetStrategy,
     ) -> Result<f64> {
+        simple_validation_with_strategy_and_scaling(dataset, train_ratio, c, strategy, None)
+    }
+
+    /// Cross-validation helper with configurable working set strategy and scaling
+    pub fn simple_validation_with_strategy_and_scaling<D: Dataset>(
+        dataset: &D,
+        train_ratio: f64,
+        c: f64,
+        strategy: WorkingSetStrategy,
+        scaling: Option<ScalingMethod>,
+    ) -> Result<f64> {
         if train_ratio <= 0.0 || train_ratio >= 1.0 {
             return Err(SVMError::InvalidParameter(format!(
                 "Train ratio must be between 0 and 1, got: {train_ratio}"
@@ -435,10 +462,13 @@ pub mod quick {
         let train_samples: Vec<Sample> = (0..train_size).map(|i| dataset.get_sample(i)).collect();
         let test_samples: Vec<Sample> = (train_size..n).map(|i| dataset.get_sample(i)).collect();
 
-        let model = SVM::new()
-            .with_c(c)
-            .with_working_set_strategy(strategy)
-            .train_samples(&train_samples)?;
+        let mut svm_builder = SVM::new().with_c(c).with_working_set_strategy(strategy);
+
+        if let Some(method) = scaling {
+            svm_builder = svm_builder.with_feature_scaling(method);
+        }
+
+        let model = svm_builder.train_samples(&train_samples)?;
 
         let correct = test_samples
             .iter()

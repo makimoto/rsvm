@@ -199,6 +199,9 @@ enum QuickOperation {
         /// Regularization parameter C
         #[arg(short = 'C', long, default_value = "1.0")]
         c: f64,
+        /// Feature scaling method
+        #[arg(long)]
+        feature_scaling: Option<CliScalingMethod>,
     },
     /// Cross-validation on a single dataset
     Cv {
@@ -213,6 +216,9 @@ enum QuickOperation {
         /// Working set selection strategy
         #[arg(long, default_value = "smo-heuristic")]
         working_set_strategy: CliWorkingSetStrategy,
+        /// Feature scaling method
+        #[arg(long)]
+        feature_scaling: Option<CliScalingMethod>,
     },
 }
 
@@ -513,15 +519,24 @@ fn info_command(args: InfoArgs) -> Result<()> {
 
 fn quick_command(args: QuickArgs) -> Result<()> {
     match args.operation {
-        QuickOperation::Eval { train, test, c } => {
+        QuickOperation::Eval {
+            train,
+            test,
+            c,
+            feature_scaling,
+        } => {
             info!("Quick evaluation: train on {train:?}, test on {test:?}");
 
-            let accuracy = quick::evaluate_split(&train, &test)?;
+            let scaling_method = feature_scaling.clone().map(|s| s.into());
+            let accuracy = quick::evaluate_split_with_params(&train, &test, c, scaling_method)?;
 
             println!("=== Quick Evaluation Results ===");
             println!("Training file: {train:?}");
             println!("Test file: {test:?}");
             println!("C parameter: {c}");
+            if let Some(ref scaling) = feature_scaling {
+                println!("Feature scaling: {:?}", scaling);
+            }
             println!("Test accuracy: {:.2}%", accuracy * 100.0);
 
             Ok(())
@@ -531,19 +546,34 @@ fn quick_command(args: QuickArgs) -> Result<()> {
             ratio,
             c,
             working_set_strategy,
+            feature_scaling,
         } => {
             info!("Cross-validation on {data:?} with ratio {ratio}");
 
             let format = detect_format(&data);
             let strategy = working_set_strategy.clone().into();
+            let scaling_method = feature_scaling.clone().map(|s| s.into());
+
             let accuracy = match format.as_str() {
                 "libsvm" => {
                     let dataset = LibSVMDataset::from_file(&data)?;
-                    quick::simple_validation_with_strategy(&dataset, ratio, c, strategy)?
+                    quick::simple_validation_with_strategy_and_scaling(
+                        &dataset,
+                        ratio,
+                        c,
+                        strategy,
+                        scaling_method,
+                    )?
                 }
                 "csv" => {
                     let dataset = CSVDataset::from_file(&data)?;
-                    quick::simple_validation_with_strategy(&dataset, ratio, c, strategy)?
+                    quick::simple_validation_with_strategy_and_scaling(
+                        &dataset,
+                        ratio,
+                        c,
+                        strategy,
+                        scaling_method,
+                    )?
                 }
                 _ => {
                     return Err(rsvm::core::SVMError::InvalidParameter(format!(
@@ -557,6 +587,9 @@ fn quick_command(args: QuickArgs) -> Result<()> {
             println!("Train/test ratio: {ratio:.1}/{:.1}", 1.0 - ratio);
             println!("C parameter: {c}");
             println!("Working set strategy: {:?}", strategy);
+            if let Some(ref scaling) = feature_scaling {
+                println!("Feature scaling: {:?}", scaling);
+            }
             println!("CV accuracy: {:.2}%", accuracy * 100.0);
 
             Ok(())

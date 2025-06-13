@@ -162,11 +162,17 @@ Training Parameters:
 # Train/test split evaluation
 rsvm quick eval training_data.libsvm test_data.libsvm
 
+# Train/test split with feature scaling
+rsvm quick eval training_data.libsvm test_data.libsvm --feature-scaling minmax
+
 # Cross-validation
 rsvm quick cv data.libsvm --ratio 0.8
 
-# Quick evaluation with custom parameters
-rsvm quick cv data.libsvm --ratio 0.8 -C 5.0
+# Cross-validation with feature scaling
+rsvm quick cv data.libsvm --ratio 0.8 --feature-scaling standard
+
+# Quick evaluation with custom parameters and scaling
+rsvm quick cv data.libsvm --ratio 0.8 -C 5.0 --feature-scaling minmax
 ```
 
 ### Practical CLI Workflow
@@ -204,6 +210,9 @@ rsvm evaluate --model trained_model.json --data test_data.libsvm --detailed
 
 # 7. Cross-validate on original data
 rsvm quick cv sample_data.libsvm --ratio 0.8
+
+# 8. Cross-validate with feature scaling for better accuracy
+rsvm quick cv sample_data.libsvm --ratio 0.8 --feature-scaling standard
 ```
 
 ### Parameter Tuning
@@ -213,6 +222,12 @@ rsvm quick cv sample_data.libsvm --ratio 0.8
 for c in 0.1 1.0 10.0 100.0; do
   echo "Testing C=$c"
   rsvm quick cv data.libsvm -C $c --ratio 0.8
+done
+
+# Parameter tuning with feature scaling
+for c in 0.1 1.0 10.0 100.0; do
+  echo "Testing C=$c with StandardScore scaling"
+  rsvm quick cv data.libsvm -C $c --ratio 0.8 --feature-scaling standard
 done
 ```
 
@@ -495,10 +510,21 @@ println!("Specificity: {:.3}", metrics.specificity());
 
 ```rust
 use rsvm::api::quick;
+use rsvm::utils::scaling::ScalingMethod;
 
 // Simple train/test split validation
 let accuracy = quick::simple_validation(&dataset, 0.8, 1.0)?;
 println!("Cross-validation accuracy: {:.1}%", accuracy * 100.0);
+
+// Cross-validation with feature scaling
+let accuracy_scaled = quick::simple_validation_with_strategy_and_scaling(
+    &dataset, 
+    0.8, 
+    1.0,
+    rsvm::core::WorkingSetStrategy::SMOHeuristic,
+    Some(ScalingMethod::StandardScore)
+)?;
+println!("CV accuracy with scaling: {:.1}%", accuracy_scaled * 100.0);
 ```
 
 ## Advanced Configuration

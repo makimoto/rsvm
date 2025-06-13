@@ -43,6 +43,12 @@ rsvm train --data data.libsvm --output model.json --max-iterations 500
 
 # Increase cache for better performance
 rsvm train --data data.libsvm --output model.json --cache-size 200
+
+# Train with automatic feature scaling
+rsvm train --data data.libsvm --output model.json --feature-scaling minmax
+
+# Train with standard score normalization
+rsvm train --data data.libsvm --output model.json --feature-scaling standard
 ```
 
 ### Verbose Training
@@ -139,6 +145,9 @@ rsvm quick eval train.libsvm test.libsvm
 
 # With custom C parameter
 rsvm quick eval train.libsvm test.libsvm -C 5.0
+
+# With feature scaling
+rsvm quick eval train.libsvm test.libsvm --feature-scaling minmax
 ```
 
 ### Cross-Validation
@@ -154,6 +163,12 @@ rsvm quick cv data.libsvm --ratio 0.7
 
 # Different C parameter
 rsvm quick cv data.libsvm --ratio 0.8 -C 2.0
+
+# Cross-validation with feature scaling
+rsvm quick cv data.libsvm --ratio 0.8 --feature-scaling standard
+
+# Combine multiple options
+rsvm quick cv data.libsvm --ratio 0.8 -C 5.0 --feature-scaling minmax
 ```
 
 ## Working with Different Data Formats
@@ -201,6 +216,12 @@ rsvm train --data dataset.svm --output model.json     # Detects LibSVM
 for c in 0.1 1.0 10.0 100.0; do
     echo "Testing C=$c"
     rsvm quick cv data.libsvm -C $c --ratio 0.8
+done
+
+# Test C values with feature scaling
+for c in 0.1 1.0 10.0 100.0; do
+    echo "Testing C=$c with StandardScore scaling"
+    rsvm quick cv data.libsvm -C $c --ratio 0.8 --feature-scaling standard
 done
 ```
 

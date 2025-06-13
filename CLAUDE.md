@@ -134,6 +134,14 @@ cargo tarpaulin --out Html
 - **プロダクション品質のSVMライブラリ + CLI完成**
 
 ### 2025-06-13
+- **シュリンキングヒューリスティック実装**（SVMlight論文Section 4準拠、変数除去による最適化）
+- **作業セット選択戦略実装**（SMOヒューリスティック、最急降下法、ランダム選択）
+- **フィーチャースケーリング機能実装**（MinMax、StandardScore、UnitScale）
+- **クロスバリデーションでのスケーリングサポート追加**
+- Heartデータセットでの実証：スケーリングなし44.44% → StandardScore 85.19%（91.7%改善）
+- 146テスト全パス、包括的なドキュメント更新
+
+### 2025-06-13
 - **CI/CD問題解決とRust Beta互換性**（重要な学習セッション）
 - ライセンスチェック改善（マルチライセンス依存関係の適切な処理）
 - Rust Beta clippyワーニング修正（uninlined_format_args、ptr_arg、needless_range_loop）
