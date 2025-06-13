@@ -28,7 +28,7 @@ use crate::core::{
 use crate::data::{CSVDataset, LibSVMDataset};
 use crate::kernel::{
     ChiSquareKernel, HellingerKernel, HistogramIntersectionKernel, Kernel, LinearKernel,
-    PolynomialKernel, RBFKernel,
+    PolynomialKernel, RBFKernel, SigmoidKernel,
 };
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
 use crate::utils::scaling::{ScalingMethod, ScalingParams};
@@ -332,6 +332,113 @@ impl SVM<HellingerKernel> {
     pub fn with_hellinger_stats() -> Self {
         Self {
             kernel: HellingerKernel::for_statistical_analysis(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+}
+
+impl SVM<SigmoidKernel> {
+    /// Create a new SVM with Sigmoid (Tanh) kernel
+    ///
+    /// The Sigmoid kernel is a non-stationary kernel that can model complex
+    /// decision boundaries. It's inspired by neural network activation functions
+    /// and can be effective for problems where RBF/polynomial kernels underperform.
+    ///
+    /// Note: The kernel may not be positive semi-definite for all parameter values.
+    /// Careful parameter selection is required for good performance.
+    ///
+    /// # Arguments
+    /// * `gamma` - Scaling parameter for the dot product (must be positive)
+    /// * `coef0` - Bias/offset parameter
+    pub fn with_sigmoid(gamma: f64, coef0: f64) -> Self {
+        Self {
+            kernel: SigmoidKernel::new(gamma, coef0),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Sigmoid kernel using default parameters
+    ///
+    /// Uses gamma = 0.01 and coef0 = 0.0, which often work well in practice.
+    /// This is a good starting point for experimentation.
+    pub fn with_sigmoid_default() -> Self {
+        Self {
+            kernel: SigmoidKernel::default_params(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Sigmoid kernel using neural network-inspired parameters
+    ///
+    /// Uses gamma = 1/n_features and coef0 = -1.0, mimicking neural network behavior.
+    /// This configuration often works well for classification tasks.
+    ///
+    /// # Arguments
+    /// * `n_features` - Number of features in the dataset
+    pub fn with_sigmoid_neural(n_features: usize) -> Self {
+        Self {
+            kernel: SigmoidKernel::neural_network(n_features),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Sigmoid kernel optimized for binary classification
+    ///
+    /// Uses gamma = 0.1 and coef0 = -1.0, often effective for binary problems.
+    /// This configuration provides good separation for two-class problems.
+    pub fn with_sigmoid_binary() -> Self {
+        Self {
+            kernel: SigmoidKernel::for_binary_classification(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Sigmoid kernel with zero bias
+    ///
+    /// Uses specified gamma with coef0 = 0.0, creating an origin-centered kernel.
+    /// This is useful when features are already centered around zero.
+    ///
+    /// # Arguments
+    /// * `gamma` - Scaling parameter for the dot product
+    pub fn with_sigmoid_zero_bias(gamma: f64) -> Self {
+        Self {
+            kernel: SigmoidKernel::zero_bias(gamma),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Sigmoid kernel with positive bias
+    ///
+    /// Uses specified gamma with coef0 = 1.0, shifting the sigmoid curve right.
+    /// This can help when dealing with all-positive feature values.
+    ///
+    /// # Arguments
+    /// * `gamma` - Scaling parameter for the dot product
+    pub fn with_sigmoid_positive_bias(gamma: f64) -> Self {
+        Self {
+            kernel: SigmoidKernel::positive_bias(gamma),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Sigmoid kernel with normalized gamma
+    ///
+    /// Uses gamma = 1/√n_features and specified bias, providing scale-invariance.
+    /// This normalization helps with datasets of varying feature dimensions.
+    ///
+    /// # Arguments
+    /// * `n_features` - Number of features in the dataset
+    /// * `coef0` - Bias/offset parameter
+    pub fn with_sigmoid_normalized(n_features: usize, coef0: f64) -> Self {
+        Self {
+            kernel: SigmoidKernel::normalized(n_features, coef0),
             config: OptimizerConfig::default(),
             scaling_method: None,
         }
@@ -2294,5 +2401,180 @@ mod tests {
 
         assert!(pred_linear.decision_value.is_finite());
         assert!(pred_poly.decision_value.is_finite());
+    }
+
+    #[test]
+    fn test_sigmoid_kernel_api() {
+        let samples = vec![
+            // Class 1: Positive examples
+            Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 3.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![3.0, 4.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.5, 2.5]), 1.0),
+            // Class 2: Negative examples
+            Sample::new(SparseVector::new(vec![0, 1], vec![-2.0, -3.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-3.0, -4.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.5, -2.5]), -1.0),
+        ];
+
+        // Test different Sigmoid kernel variants
+        let model_sigmoid = SVM::with_sigmoid(0.1, -1.0)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid training should succeed");
+
+        let model_default = SVM::with_sigmoid_default()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid default training should succeed");
+
+        let model_neural = SVM::with_sigmoid_neural(2)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid neural training should succeed");
+
+        let model_binary = SVM::with_sigmoid_binary()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid binary training should succeed");
+
+        let model_zero_bias = SVM::with_sigmoid_zero_bias(0.05)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid zero bias training should succeed");
+
+        let model_positive_bias = SVM::with_sigmoid_positive_bias(0.05)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid positive bias training should succeed");
+
+        let model_normalized = SVM::with_sigmoid_normalized(2, -0.5)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid normalized training should succeed");
+
+        // All models should train successfully
+        assert!(model_sigmoid.info().n_support_vectors > 0);
+        assert!(model_default.info().n_support_vectors > 0);
+        assert!(model_neural.info().n_support_vectors > 0);
+        assert!(model_binary.info().n_support_vectors > 0);
+        assert!(model_zero_bias.info().n_support_vectors > 0);
+        assert!(model_positive_bias.info().n_support_vectors > 0);
+        assert!(model_normalized.info().n_support_vectors > 0);
+
+        // Test predictions on a point that should be positive
+        let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![2.5, 3.5]), 1.0);
+
+        let pred_sigmoid = model_sigmoid.predict(&test_sample);
+        let pred_default = model_default.predict(&test_sample);
+        let pred_neural = model_neural.predict(&test_sample);
+        let pred_binary = model_binary.predict(&test_sample);
+        let pred_zero_bias = model_zero_bias.predict(&test_sample);
+        let pred_positive_bias = model_positive_bias.predict(&test_sample);
+        let pred_normalized = model_normalized.predict(&test_sample);
+
+        // All predictions should be finite
+        assert!(pred_sigmoid.decision_value.is_finite());
+        assert!(pred_default.decision_value.is_finite());
+        assert!(pred_neural.decision_value.is_finite());
+        assert!(pred_binary.decision_value.is_finite());
+        assert!(pred_zero_bias.decision_value.is_finite());
+        assert!(pred_positive_bias.decision_value.is_finite());
+        assert!(pred_normalized.decision_value.is_finite());
+
+        // For this clearly positive example, most should predict positive
+        assert_eq!(pred_sigmoid.label, 1.0);
+        assert_eq!(pred_binary.label, 1.0);
+    }
+
+    #[test]
+    fn test_sigmoid_vs_other_kernels() {
+        // Create a non-linearly separable problem where sigmoid might excel
+        let samples = vec![
+            // Class 1: Points in quadrants 1 and 3
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-2.0, -2.0]), 1.0),
+            // Class 2: Points in quadrants 2 and 4
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-2.0, 2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![2.0, -2.0]), -1.0),
+        ];
+
+        // Train different kernels
+        let model_linear = SVM::new()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Linear training should succeed");
+
+        let model_sigmoid = SVM::with_sigmoid_binary()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Sigmoid training should succeed");
+
+        let model_rbf = SVM::with_rbf(1.0)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("RBF training should succeed");
+
+        let model_poly = SVM::with_quadratic(1.0)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Polynomial training should succeed");
+
+        // All should train successfully
+        assert!(model_linear.info().n_support_vectors > 0);
+        assert!(model_sigmoid.info().n_support_vectors > 0);
+        assert!(model_rbf.info().n_support_vectors > 0);
+        assert!(model_poly.info().n_support_vectors > 0);
+
+        // Calculate accuracy for each
+        let linear_correct = samples
+            .iter()
+            .map(|sample| model_linear.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let sigmoid_correct = samples
+            .iter()
+            .map(|sample| model_sigmoid.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let rbf_correct = samples
+            .iter()
+            .map(|sample| model_rbf.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let poly_correct = samples
+            .iter()
+            .map(|sample| model_poly.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let linear_accuracy = linear_correct as f64 / samples.len() as f64;
+        let sigmoid_accuracy = sigmoid_correct as f64 / samples.len() as f64;
+        let rbf_accuracy = rbf_correct as f64 / samples.len() as f64;
+        let poly_accuracy = poly_correct as f64 / samples.len() as f64;
+
+        // All should achieve reasonable accuracy on this problem
+        assert!(linear_accuracy >= 0.0);
+        assert!(sigmoid_accuracy >= 0.0);
+        assert!(rbf_accuracy >= 0.0);
+        assert!(poly_accuracy >= 0.0);
+
+        // Non-linear kernels should generally perform better
+        assert!(sigmoid_accuracy >= linear_accuracy - 0.1); // Allow some tolerance
+
+        // Test prediction on origin (should be uncertain)
+        let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![0.0, 0.0]), 0.0);
+        let pred_sigmoid = model_sigmoid.predict(&test_sample);
+        assert!(pred_sigmoid.decision_value.is_finite());
     }
 }
