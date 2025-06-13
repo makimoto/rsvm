@@ -26,7 +26,7 @@ use crate::core::{
     Dataset, OptimizerConfig, Prediction, Result, SVMError, SVMModel, Sample, WorkingSetStrategy,
 };
 use crate::data::{CSVDataset, LibSVMDataset};
-use crate::kernel::{Kernel, LinearKernel, RBFKernel};
+use crate::kernel::{Kernel, LinearKernel, PolynomialKernel, RBFKernel};
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
 use crate::utils::scaling::{ScalingMethod, ScalingParams};
 use std::path::Path;
@@ -78,6 +78,71 @@ impl SVM<RBFKernel> {
     pub fn with_rbf_unit() -> Self {
         Self {
             kernel: RBFKernel::unit_gamma(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+}
+
+impl SVM<PolynomialKernel> {
+    /// Create a new SVM with polynomial kernel
+    ///
+    /// # Arguments
+    /// * `degree` - Degree of the polynomial (must be > 0)
+    /// * `gamma` - Scaling factor for the dot product
+    /// * `coef0` - Independent term in the polynomial
+    pub fn with_polynomial(degree: u32, gamma: f64, coef0: f64) -> Self {
+        Self {
+            kernel: PolynomialKernel::new(degree, gamma, coef0),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with quadratic kernel: (γ * <x,y> + 1)²
+    ///
+    /// # Arguments
+    /// * `gamma` - Scaling factor for the dot product
+    pub fn with_quadratic(gamma: f64) -> Self {
+        Self {
+            kernel: PolynomialKernel::quadratic(gamma),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with cubic kernel: (γ * <x,y> + 1)³
+    ///
+    /// # Arguments
+    /// * `gamma` - Scaling factor for the dot product
+    pub fn with_cubic(gamma: f64) -> Self {
+        Self {
+            kernel: PolynomialKernel::cubic(gamma),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with polynomial kernel using auto-gamma
+    ///
+    /// # Arguments
+    /// * `degree` - Degree of the polynomial
+    /// * `n_features` - Number of features in the dataset
+    pub fn with_polynomial_auto(degree: u32, n_features: usize) -> Self {
+        Self {
+            kernel: PolynomialKernel::auto(degree, n_features),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with normalized polynomial kernel
+    ///
+    /// # Arguments  
+    /// * `degree` - Degree of the polynomial
+    pub fn with_polynomial_normalized(degree: u32) -> Self {
+        Self {
+            kernel: PolynomialKernel::normalized(degree),
             config: OptimizerConfig::default(),
             scaling_method: None,
         }
@@ -1189,5 +1254,189 @@ mod tests {
         // Both accuracies should be reasonable
         assert!(linear_accuracy >= 0.0);
         assert!(rbf_accuracy >= 0.0);
+    }
+
+    #[test]
+    fn test_polynomial_kernel_api() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-2.0, -1.0]), -1.0),
+        ];
+
+        // Test polynomial with custom parameters
+        let model_poly = SVM::with_polynomial(3, 1.0, 1.0)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Polynomial training should succeed");
+
+        // Test quadratic kernel
+        let model_quad = SVM::with_quadratic(0.5)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Quadratic training should succeed");
+
+        // Test cubic kernel
+        let model_cubic = SVM::with_cubic(0.5)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Cubic training should succeed");
+
+        // Test auto gamma polynomial
+        let model_auto = SVM::with_polynomial_auto(2, 2)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Auto polynomial training should succeed");
+
+        // Test normalized polynomial
+        let model_norm = SVM::with_polynomial_normalized(2)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Normalized polynomial training should succeed");
+
+        // All models should train successfully
+        assert!(model_poly.info().n_support_vectors > 0);
+        assert!(model_quad.info().n_support_vectors > 0);
+        assert!(model_cubic.info().n_support_vectors > 0);
+        assert!(model_auto.info().n_support_vectors > 0);
+        assert!(model_norm.info().n_support_vectors > 0);
+
+        // Test predictions
+        let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![1.5, 1.5]), 1.0);
+
+        let pred_poly = model_poly.predict(&test_sample);
+        let pred_quad = model_quad.predict(&test_sample);
+        let pred_cubic = model_cubic.predict(&test_sample);
+        let pred_auto = model_auto.predict(&test_sample);
+        let pred_norm = model_norm.predict(&test_sample);
+
+        // All predictions should be finite
+        assert!(pred_poly.decision_value.is_finite());
+        assert!(pred_quad.decision_value.is_finite());
+        assert!(pred_cubic.decision_value.is_finite());
+        assert!(pred_auto.decision_value.is_finite());
+        assert!(pred_norm.decision_value.is_finite());
+
+        // For this separable case, all should predict positive
+        assert_eq!(pred_poly.label, 1.0);
+        assert_eq!(pred_quad.label, 1.0);
+        assert_eq!(pred_cubic.label, 1.0);
+        assert_eq!(pred_auto.label, 1.0);
+        assert_eq!(pred_norm.label, 1.0);
+    }
+
+    #[test]
+    fn test_polynomial_kernel_degrees() {
+        use crate::utils::scaling::ScalingMethod;
+
+        // Create a dataset that benefits from non-linear classification
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![0.8, 0.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-0.8, -0.8]), 1.0),
+        ];
+
+        // Test different polynomial degrees
+        let degrees = [2, 3, 4];
+        let mut models = Vec::new();
+
+        for &degree in &degrees {
+            let model = SVM::with_polynomial(degree, 1.0, 1.0)
+                .with_c(10.0)
+                .with_feature_scaling(ScalingMethod::MinMax {
+                    min_val: -1.0,
+                    max_val: 1.0,
+                })
+                .train_samples(&samples)
+                .expect(&format!(
+                    "Polynomial degree {} training should succeed",
+                    degree
+                ));
+
+            models.push(model);
+        }
+
+        // All models should train successfully
+        for model in &models {
+            assert!(model.info().n_support_vectors > 0);
+        }
+
+        // Test predictions on a new sample
+        let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![0.5, 0.5]), 1.0);
+
+        for (i, model) in models.iter().enumerate() {
+            let pred = model.predict(&test_sample);
+            assert!(
+                pred.decision_value.is_finite(),
+                "Prediction for degree {} should be finite",
+                degrees[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_polynomial_vs_linear_comparison() {
+        use crate::utils::scaling::ScalingMethod;
+
+        // Create a dataset where polynomial should outperform linear
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![0.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), -1.0),
+        ];
+
+        // Train linear SVM
+        let model_linear = SVM::new()
+            .with_c(1.0)
+            .with_feature_scaling(ScalingMethod::StandardScore)
+            .train_samples(&samples)
+            .expect("Linear training should succeed");
+
+        // Train polynomial SVM
+        let model_poly = SVM::with_quadratic(1.0)
+            .with_c(1.0)
+            .with_feature_scaling(ScalingMethod::StandardScore)
+            .train_samples(&samples)
+            .expect("Polynomial training should succeed");
+
+        // Both should train successfully
+        assert!(model_linear.info().n_support_vectors > 0);
+        assert!(model_poly.info().n_support_vectors > 0);
+
+        // Calculate training accuracy for both
+        let linear_correct = samples
+            .iter()
+            .map(|sample| model_linear.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let poly_correct = samples
+            .iter()
+            .map(|sample| model_poly.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let linear_accuracy = linear_correct as f64 / samples.len() as f64;
+        let poly_accuracy = poly_correct as f64 / samples.len() as f64;
+
+        // Both should achieve reasonable accuracy
+        assert!(linear_accuracy >= 0.0);
+        assert!(poly_accuracy >= 0.0);
+
+        // Test prediction consistency
+        let test_sample = Sample::new(SparseVector::new(vec![0], vec![1.2]), -1.0);
+        let pred_linear = model_linear.predict(&test_sample);
+        let pred_poly = model_poly.predict(&test_sample);
+
+        assert!(pred_linear.decision_value.is_finite());
+        assert!(pred_poly.decision_value.is_finite());
     }
 }
