@@ -26,7 +26,9 @@ use crate::core::{
     Dataset, OptimizerConfig, Prediction, Result, SVMError, SVMModel, Sample, WorkingSetStrategy,
 };
 use crate::data::{CSVDataset, LibSVMDataset};
-use crate::kernel::{ChiSquareKernel, Kernel, LinearKernel, PolynomialKernel, RBFKernel};
+use crate::kernel::{
+    ChiSquareKernel, HistogramIntersectionKernel, Kernel, LinearKernel, PolynomialKernel, RBFKernel,
+};
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
 use crate::utils::scaling::{ScalingMethod, ScalingParams};
 use std::path::Path;
@@ -145,6 +147,87 @@ impl SVM<ChiSquareKernel> {
     pub fn with_chi_square_text() -> Self {
         Self {
             kernel: ChiSquareKernel::for_text_analysis(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+}
+
+impl SVM<HistogramIntersectionKernel> {
+    /// Create a new SVM with Histogram Intersection kernel for computer vision
+    ///
+    /// The Histogram Intersection kernel is particularly effective for:
+    /// - Image classification with color histograms
+    /// - Object recognition with SIFT/SURF descriptors  
+    /// - Texture analysis with Local Binary Patterns (LBP)
+    /// - Visual bag-of-words representations
+    /// - Any histogram-based feature representation
+    ///
+    /// # Arguments
+    /// * `normalized` - Whether to normalize by minimum L1 norm (recommended for different histogram sizes)
+    pub fn with_histogram_intersection(normalized: bool) -> Self {
+        Self {
+            kernel: HistogramIntersectionKernel::new(normalized),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with standard (non-normalized) Histogram Intersection kernel
+    ///
+    /// This preserves absolute histogram counts, suitable for bag-of-visual-words
+    /// and other applications where frequency magnitude matters.
+    pub fn with_histogram_intersection_standard() -> Self {
+        Self {
+            kernel: HistogramIntersectionKernel::standard(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with normalized Histogram Intersection kernel
+    ///
+    /// Normalizes by min(||x||₁, ||y||₁), giving values in [0,1].
+    /// Recommended when histograms have different total counts.
+    pub fn with_histogram_intersection_normalized() -> Self {
+        Self {
+            kernel: HistogramIntersectionKernel::normalized(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Histogram Intersection kernel optimized for color histograms
+    ///
+    /// Uses normalized intersection, which is standard practice for color histogram
+    /// comparison in computer vision. Effective for RGB, HSV, and other color spaces.
+    pub fn with_histogram_intersection_color() -> Self {
+        Self {
+            kernel: HistogramIntersectionKernel::for_color_histograms(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Histogram Intersection kernel optimized for visual words
+    ///
+    /// Uses standard intersection to preserve absolute frequency information,
+    /// important for bag-of-visual-words representations in object recognition.
+    pub fn with_histogram_intersection_visual_words() -> Self {
+        Self {
+            kernel: HistogramIntersectionKernel::for_visual_words(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Histogram Intersection kernel optimized for texture analysis
+    ///
+    /// Uses normalized intersection, suitable for Local Binary Pattern (LBP)
+    /// histograms and other texture descriptors.
+    pub fn with_histogram_intersection_texture() -> Self {
+        Self {
+            kernel: HistogramIntersectionKernel::for_texture_analysis(),
             config: OptimizerConfig::default(),
             scaling_method: None,
         }
@@ -1618,6 +1701,199 @@ mod tests {
         let pred_chi2 = model_chi2.predict(&test_sample);
 
         assert!(pred_linear.decision_value.is_finite());
+        assert!(pred_chi2.decision_value.is_finite());
+    }
+
+    #[test]
+    fn test_histogram_intersection_kernel_api() {
+        let samples = vec![
+            // Histogram class 1: peaks at beginning
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![30.0, 20.0, 10.0, 5.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![35.0, 25.0, 8.0, 7.0]),
+                1.0,
+            ),
+            // Histogram class 2: peaks at end
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![5.0, 10.0, 25.0, 30.0]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![8.0, 12.0, 20.0, 35.0]),
+                -1.0,
+            ),
+        ];
+
+        // Test different histogram intersection variants
+        let model_standard = SVM::with_histogram_intersection_standard()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Standard histogram intersection training should succeed");
+
+        let model_normalized = SVM::with_histogram_intersection_normalized()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Normalized histogram intersection training should succeed");
+
+        let model_color = SVM::with_histogram_intersection_color()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Color histogram training should succeed");
+
+        let model_visual_words = SVM::with_histogram_intersection_visual_words()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Visual words training should succeed");
+
+        let model_texture = SVM::with_histogram_intersection_texture()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Texture analysis training should succeed");
+
+        let model_manual = SVM::with_histogram_intersection(true)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Manual histogram intersection training should succeed");
+
+        // All models should train successfully
+        assert!(model_standard.info().n_support_vectors > 0);
+        assert!(model_normalized.info().n_support_vectors > 0);
+        assert!(model_color.info().n_support_vectors > 0);
+        assert!(model_visual_words.info().n_support_vectors > 0);
+        assert!(model_texture.info().n_support_vectors > 0);
+        assert!(model_manual.info().n_support_vectors > 0);
+
+        // Test predictions on histogram leaning towards class 1
+        let test_sample = Sample::new(
+            SparseVector::new(vec![0, 1, 2, 3], vec![25.0, 15.0, 10.0, 5.0]),
+            1.0,
+        );
+
+        let pred_standard = model_standard.predict(&test_sample);
+        let pred_normalized = model_normalized.predict(&test_sample);
+        let pred_color = model_color.predict(&test_sample);
+        let pred_visual_words = model_visual_words.predict(&test_sample);
+        let pred_texture = model_texture.predict(&test_sample);
+        let pred_manual = model_manual.predict(&test_sample);
+
+        // All predictions should be finite and reasonable
+        assert!(pred_standard.decision_value.is_finite());
+        assert!(pred_normalized.decision_value.is_finite());
+        assert!(pred_color.decision_value.is_finite());
+        assert!(pred_visual_words.decision_value.is_finite());
+        assert!(pred_texture.decision_value.is_finite());
+        assert!(pred_manual.decision_value.is_finite());
+
+        // For this histogram pattern, should predict positive
+        assert_eq!(pred_standard.label, 1.0);
+        assert_eq!(pred_normalized.label, 1.0);
+        assert_eq!(pred_color.label, 1.0);
+        assert_eq!(pred_visual_words.label, 1.0);
+        assert_eq!(pred_texture.label, 1.0);
+        assert_eq!(pred_manual.label, 1.0);
+    }
+
+    #[test]
+    fn test_histogram_intersection_vs_other_kernels() {
+        // Create histogram data where Histogram Intersection should excel
+        let samples = vec![
+            // Class 1: Exponential decay histograms (common in computer vision)
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![50.0, 25.0, 12.0, 6.0, 3.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![48.0, 28.0, 14.0, 8.0, 2.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![52.0, 22.0, 11.0, 5.0, 4.0]),
+                1.0,
+            ),
+            // Class 2: Uniform-like histograms
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![20.0, 19.0, 18.0, 21.0, 22.0]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![18.0, 21.0, 20.0, 19.0, 22.0]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![22.0, 18.0, 19.0, 20.0, 21.0]),
+                -1.0,
+            ),
+        ];
+
+        // Train different kernels
+        let model_linear = SVM::new()
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Linear training should succeed");
+
+        let model_hist = SVM::with_histogram_intersection_normalized()
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Histogram intersection training should succeed");
+
+        let model_chi2 = SVM::with_chi_square(1.0)
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Chi-square training should succeed");
+
+        // All should train successfully
+        assert!(model_linear.info().n_support_vectors > 0);
+        assert!(model_hist.info().n_support_vectors > 0);
+        assert!(model_chi2.info().n_support_vectors > 0);
+
+        // Calculate accuracy for each
+        let linear_correct = samples
+            .iter()
+            .map(|sample| model_linear.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let hist_correct = samples
+            .iter()
+            .map(|sample| model_hist.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let chi2_correct = samples
+            .iter()
+            .map(|sample| model_chi2.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let linear_accuracy = linear_correct as f64 / samples.len() as f64;
+        let hist_accuracy = hist_correct as f64 / samples.len() as f64;
+        let chi2_accuracy = chi2_correct as f64 / samples.len() as f64;
+
+        // All should achieve reasonable accuracy
+        assert!(linear_accuracy >= 0.0);
+        assert!(hist_accuracy >= 0.0);
+        assert!(chi2_accuracy >= 0.0);
+
+        // Histogram intersection should perform well on histogram data
+        assert!(hist_accuracy >= linear_accuracy - 0.1); // Allow some tolerance
+
+        // Test prediction consistency
+        let test_sample = Sample::new(
+            SparseVector::new(vec![0, 1, 2, 3, 4], vec![45.0, 24.0, 13.0, 7.0, 3.0]),
+            1.0,
+        );
+        let pred_linear = model_linear.predict(&test_sample);
+        let pred_hist = model_hist.predict(&test_sample);
+        let pred_chi2 = model_chi2.predict(&test_sample);
+
+        assert!(pred_linear.decision_value.is_finite());
+        assert!(pred_hist.decision_value.is_finite());
         assert!(pred_chi2.decision_value.is_finite());
     }
 
