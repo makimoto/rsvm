@@ -17,7 +17,7 @@ A pure Rust implementation of Support Vector Machine (SVM) inspired by the SVMli
 - **Model Persistence**: Save and load trained models in JSON format with metadata
 
 ### Quality Assurance
-- **Comprehensive Testing**: 88 tests achieving 82%+ code coverage
+- **Comprehensive Testing**: 170 tests achieving 81%+ code coverage
 - **Production Ready**: Robust error handling, extensive validation, and CI/CD pipeline
 - **Documentation**: Complete tutorials, CLI examples, and technical design docs
 
@@ -32,7 +32,7 @@ A pure Rust implementation of Support Vector Machine (SVM) inspired by the SVMli
 - ✅ **Implementation Clarity**: Direct mapping to well-understood SMO algorithm
 
 **SVMlight Paper Features**:
-- 🔧 **Missing: Shrinking Heuristic** - Could provide 2.8x speedup for large problems
+- ✅ **Implemented: Shrinking Heuristic** - Section 4 implementation with Lagrange multiplier estimation
 - 🔧 **Missing: Variable Working Set Size** - q > 2 for potentially faster convergence
 - 🔧 **Missing: Steepest Descent Selection** - More rigorous working set selection
 - ✅ **Implemented: Core Mathematics** - Dual optimization, KKT conditions, decomposition
@@ -46,7 +46,7 @@ A pure Rust implementation of Support Vector Machine (SVM) inspired by the SVMli
 | Kernel Caching | ✅ | ✅ | Complete |
 | Working Set Selection | SMO Heuristics | Steepest Descent | Functional |
 | Working Set Size | Fixed (q=2) | Variable (q≥2) | Limited |
-| Shrinking | ❌ | ✅ | Missing |
+| Shrinking | ✅ | ✅ | Complete |
 | Convergence Scaling | O(ℓ^2.1) | O(ℓ^2.1) | Equivalent |
 
 For detailed technical comparison, see [DESIGN.md](DESIGN.md#comparison-with-svmlight-paper-implementation).
@@ -72,8 +72,11 @@ println!("Accuracy: {:.1}%", accuracy * 100.0);
 # Train a model
 rsvm train --data training_data.libsvm --output model.json -C 1.0
 
+# Make predictions
+rsvm predict --model model.json --data test_data.libsvm --confidence
+
 # Evaluate performance  
-rsvm evaluate model.json test_data.libsvm
+rsvm evaluate --model model.json --data test_data.libsvm --detailed
 
 # Quick cross-validation
 rsvm quick cv data.libsvm --ratio 0.8 -C 1.0
@@ -86,19 +89,21 @@ rsvm info model.json
 
 **Current Version**: Production-ready SVM library and CLI
 - [x] **Core Algorithm**: SMO solver with linear kernel
-- [x] **Data Pipeline**: LibSVM/CSV parsers with validation
+- [x] **Data Pipeline**: LibSVM/CSV parsers with validation  
 - [x] **High-level API**: Builder pattern, quick functions, evaluation metrics
 - [x] **CLI Application**: Complete training, prediction, and evaluation workflows
 - [x] **Model Persistence**: JSON serialization with metadata
-- [x] **Quality Assurance**: 88 tests, 82% coverage, CI/CD pipeline
+- [x] **Model Reconstruction**: Full model rebuilding from saved files
+- [x] **Shrinking Optimization**: SVMlight Section 4 implementation with performance gains
+- [x] **Quality Assurance**: 170 tests, 81% coverage, CI/CD pipeline
 - [x] **Documentation**: Tutorials, examples, and technical specifications
 
 **Potential Enhancements** (future work):
-- [ ] Shrinking heuristic implementation (highest impact for large datasets)
-- [ ] RBF and polynomial kernels
+- [ ] RBF and polynomial kernels  
+- [ ] Steepest descent working set selection strategy
 - [ ] Variable working set size (q > 2)
 - [ ] Multi-class classification support
-- [ ] Model reconstruction from saved files (predict/evaluate commands)
+- [ ] Enhanced termination criteria precision
 
 ## Performance Characteristics
 

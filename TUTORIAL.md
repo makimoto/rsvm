@@ -177,13 +177,25 @@ cat > sample_data.libsvm << EOF
 -1 1:-2.2 2:-0.9
 EOF
 
-# 2. Train model
+# 2. Create test data
+cat > test_data.libsvm << EOF
++1 1:1.9 2:0.95
+-1 1:-1.9 2:-0.95
+EOF
+
+# 3. Train model
 rsvm train --data sample_data.libsvm --output trained_model.json --verbose
 
-# 3. Check model info
+# 4. Check model info
 rsvm info trained_model.json
 
-# 4. Cross-validate
+# 5. Make predictions
+rsvm predict --model trained_model.json --data test_data.libsvm --confidence
+
+# 6. Evaluate model
+rsvm evaluate --model trained_model.json --data test_data.libsvm --detailed
+
+# 7. Cross-validate on original data
 rsvm quick cv sample_data.libsvm --ratio 0.8
 ```
 
@@ -197,14 +209,46 @@ for c in 0.1 1.0 10.0 100.0; do
 done
 ```
 
-### Current CLI Limitations
+### Model Prediction and Evaluation
 
-**Note**: The current CLI implementation saves models in JSON format but has limitations with model reconstruction:
+```bash
+# Make predictions using a trained model
+rsvm predict --model my_model.json --data test_data.libsvm
 
-- `predict` command: Prediction from saved models (requires model reconstruction feature)
-- `evaluate` command: Evaluation using saved models (requires model reconstruction feature)
+# Make predictions with confidence scores
+rsvm predict --model my_model.json --data test_data.libsvm --confidence
 
-These features are identified as future enhancements. For now, use `quick` commands for immediate training and evaluation workflows, which are fully functional and production-ready.
+# Save predictions to file
+rsvm predict --model my_model.json --data test_data.libsvm --output predictions.txt
+
+# Evaluate model performance
+rsvm evaluate --model my_model.json --data test_data.libsvm
+
+# Detailed evaluation with precision, recall, F1-score
+rsvm evaluate --model my_model.json --data test_data.libsvm --detailed
+```
+
+Example detailed evaluation output:
+```
+=== Model Evaluation ===
+=== SVM Model Summary ===
+Kernel Type: linear
+Support Vectors: 2
+Bias: -0.000000
+
+Test Results:
+  Accuracy: 100.00%
+
+Detailed Metrics:
+  True Positives:  1
+  True Negatives:  1
+  False Positives: 0
+  False Negatives: 0
+  Precision:       1.0000
+  Recall:          1.0000
+  F1 Score:        1.0000
+  Specificity:     1.0000
+```
 
 For comprehensive CLI examples, see [CLI_EXAMPLES.md](CLI_EXAMPLES.md).
 
