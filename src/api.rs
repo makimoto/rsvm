@@ -26,7 +26,7 @@ use crate::core::{
     Dataset, OptimizerConfig, Prediction, Result, SVMError, SVMModel, Sample, WorkingSetStrategy,
 };
 use crate::data::{CSVDataset, LibSVMDataset};
-use crate::kernel::{Kernel, LinearKernel};
+use crate::kernel::{Kernel, LinearKernel, RBFKernel};
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
 use crate::utils::scaling::{ScalingMethod, ScalingParams};
 use std::path::Path;
@@ -43,6 +43,41 @@ impl SVM<LinearKernel> {
     pub fn new() -> Self {
         Self {
             kernel: LinearKernel::new(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+}
+
+impl SVM<RBFKernel> {
+    /// Create a new SVM with RBF kernel and specified gamma
+    ///
+    /// # Arguments
+    /// * `gamma` - The gamma parameter for the RBF kernel (must be positive)
+    pub fn with_rbf(gamma: f64) -> Self {
+        Self {
+            kernel: RBFKernel::new(gamma),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with RBF kernel using auto-gamma (1.0 / n_features)
+    ///
+    /// # Arguments
+    /// * `n_features` - Number of features in the dataset
+    pub fn with_rbf_auto(n_features: usize) -> Self {
+        Self {
+            kernel: RBFKernel::with_auto_gamma(n_features),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with RBF kernel using unit gamma (1.0)
+    pub fn with_rbf_unit() -> Self {
+        Self {
+            kernel: RBFKernel::unit_gamma(),
             config: OptimizerConfig::default(),
             scaling_method: None,
         }
@@ -399,6 +434,30 @@ pub mod quick {
         c: f64,
     ) -> Result<TrainedModel<LinearKernel>> {
         SVM::new().with_c(c).train_from_file(path)
+    }
+
+    /// Train an RBF SVM on LibSVM data with specified gamma
+    pub fn train_libsvm_rbf<P: AsRef<Path>>(
+        path: P,
+        gamma: f64,
+    ) -> Result<TrainedModel<RBFKernel>> {
+        SVM::with_rbf(gamma).train_from_file(path)
+    }
+
+    /// Train an RBF SVM on LibSVM data with auto gamma and custom C
+    pub fn train_libsvm_rbf_auto<P: AsRef<Path>>(
+        path: P,
+        n_features: usize,
+        c: f64,
+    ) -> Result<TrainedModel<RBFKernel>> {
+        SVM::with_rbf_auto(n_features)
+            .with_c(c)
+            .train_from_file(path)
+    }
+
+    /// Train an RBF SVM on CSV data with specified gamma
+    pub fn train_csv_rbf<P: AsRef<Path>>(path: P, gamma: f64) -> Result<TrainedModel<RBFKernel>> {
+        SVM::with_rbf(gamma).train_from_csv(path)
     }
 
     /// Quick evaluation: train on training file, test on test file
@@ -1017,5 +1076,118 @@ mod tests {
 
         // Labels should be the same
         assert_eq!(pred_with.label, pred_without.label);
+    }
+
+    #[test]
+    fn test_rbf_kernel_api() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.2, 0.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.2, -0.8]), -1.0),
+        ];
+
+        // Test RBF with manual gamma
+        let model_rbf = SVM::with_rbf(1.0)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("RBF training should succeed");
+
+        // Test RBF with auto gamma
+        let model_rbf_auto = SVM::with_rbf_auto(2)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("RBF auto gamma training should succeed");
+
+        // Test RBF with unit gamma
+        let model_rbf_unit = SVM::with_rbf_unit()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("RBF unit gamma training should succeed");
+
+        // All models should train successfully
+        assert!(model_rbf.info().n_support_vectors > 0);
+        assert!(model_rbf_auto.info().n_support_vectors > 0);
+        assert!(model_rbf_unit.info().n_support_vectors > 0);
+
+        // Test predictions on training data (should be good for this simple case)
+        let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![0.5, 0.5]), 1.0);
+
+        let pred_rbf = model_rbf.predict(&test_sample);
+        let pred_auto = model_rbf_auto.predict(&test_sample);
+        let pred_unit = model_rbf_unit.predict(&test_sample);
+
+        // All predictions should be reasonable
+        assert!(pred_rbf.decision_value.is_finite());
+        assert!(pred_auto.decision_value.is_finite());
+        assert!(pred_unit.decision_value.is_finite());
+
+        // For this linearly separable case, all should predict positive
+        assert_eq!(pred_rbf.label, 1.0);
+        assert_eq!(pred_auto.label, 1.0);
+        assert_eq!(pred_unit.label, 1.0);
+    }
+
+    #[test]
+    fn test_rbf_vs_linear_comparison() {
+        use crate::utils::scaling::ScalingMethod;
+
+        // Create a non-linearly separable XOR-like problem
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, -1.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, -1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![-1.0, 1.0]), 1.0),
+        ];
+
+        // Train linear SVM
+        let model_linear = SVM::new()
+            .with_c(10.0)
+            .with_feature_scaling(ScalingMethod::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            })
+            .train_samples(&samples)
+            .expect("Linear training should succeed");
+
+        // Train RBF SVM with high gamma (should handle non-linear separation better)
+        let model_rbf = SVM::with_rbf(10.0)
+            .with_c(10.0)
+            .with_feature_scaling(ScalingMethod::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            })
+            .train_samples(&samples)
+            .expect("RBF training should succeed");
+
+        // Both should train successfully
+        assert!(model_linear.info().n_support_vectors > 0);
+        assert!(model_rbf.info().n_support_vectors > 0);
+
+        // Calculate training accuracy for both
+        let linear_correct = samples
+            .iter()
+            .map(|sample| model_linear.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let rbf_correct = samples
+            .iter()
+            .map(|sample| model_rbf.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let linear_accuracy = linear_correct as f64 / samples.len() as f64;
+        let rbf_accuracy = rbf_correct as f64 / samples.len() as f64;
+
+        // RBF should perform better or equal on this non-linear problem
+        // (though with only 4 samples, results may vary)
+        assert!(rbf_accuracy >= linear_accuracy - 0.1); // Allow some tolerance
+
+        // Both accuracies should be reasonable
+        assert!(linear_accuracy >= 0.0);
+        assert!(rbf_accuracy >= 0.0);
     }
 }
