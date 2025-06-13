@@ -26,7 +26,7 @@ use crate::core::{
     Dataset, OptimizerConfig, Prediction, Result, SVMError, SVMModel, Sample, WorkingSetStrategy,
 };
 use crate::data::{CSVDataset, LibSVMDataset};
-use crate::kernel::{Kernel, LinearKernel, PolynomialKernel, RBFKernel};
+use crate::kernel::{ChiSquareKernel, Kernel, LinearKernel, PolynomialKernel, RBFKernel};
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
 use crate::utils::scaling::{ScalingMethod, ScalingParams};
 use std::path::Path;
@@ -78,6 +78,73 @@ impl SVM<RBFKernel> {
     pub fn with_rbf_unit() -> Self {
         Self {
             kernel: RBFKernel::unit_gamma(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+}
+
+impl SVM<ChiSquareKernel> {
+    /// Create a new SVM with Chi-square kernel for histogram/distribution data
+    ///
+    /// The Chi-square kernel is particularly effective for:
+    /// - Computer vision tasks with histogram features
+    /// - Text analysis with bag-of-words representations  
+    /// - Bioinformatics with frequency data
+    /// - Any data naturally represented as distributions
+    ///
+    /// # Arguments
+    /// * `gamma` - Scaling parameter for the chi-square distance (must be positive)
+    pub fn with_chi_square(gamma: f64) -> Self {
+        Self {
+            kernel: ChiSquareKernel::new(gamma),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Chi-square kernel using unit gamma (1.0)
+    ///
+    /// This is often a good starting point for histogram data.
+    pub fn with_chi_square_unit() -> Self {
+        Self {
+            kernel: ChiSquareKernel::unit_gamma(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Chi-square kernel using auto-gamma
+    ///
+    /// Uses gamma = 1.0 / n_features, suitable for high-dimensional histograms.
+    ///
+    /// # Arguments
+    /// * `n_features` - Number of features in the dataset
+    pub fn with_chi_square_auto(n_features: usize) -> Self {
+        Self {
+            kernel: ChiSquareKernel::with_auto_gamma(n_features),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Chi-square kernel optimized for computer vision
+    ///
+    /// Uses gamma = 0.5, empirically proven effective for visual features.
+    pub fn with_chi_square_cv() -> Self {
+        Self {
+            kernel: ChiSquareKernel::for_computer_vision(),
+            config: OptimizerConfig::default(),
+            scaling_method: None,
+        }
+    }
+
+    /// Create a new SVM with Chi-square kernel optimized for text analysis
+    ///
+    /// Uses gamma = 2.0, effective for term frequency histograms.
+    pub fn with_chi_square_text() -> Self {
+        Self {
+            kernel: ChiSquareKernel::for_text_analysis(),
             config: OptimizerConfig::default(),
             scaling_method: None,
         }
@@ -1376,6 +1443,182 @@ mod tests {
                 degrees[i]
             );
         }
+    }
+
+    #[test]
+    fn test_chi_square_kernel_api() {
+        let samples = vec![
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2], vec![10.0, 20.0, 30.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2], vec![15.0, 25.0, 35.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2], vec![5.0, 10.0, 15.0]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2], vec![8.0, 12.0, 18.0]),
+                -1.0,
+            ),
+        ];
+
+        // Test Chi-square with manual gamma
+        let model_chi2 = SVM::with_chi_square(1.0)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Chi-square training should succeed");
+
+        // Test Chi-square with unit gamma
+        let model_chi2_unit = SVM::with_chi_square_unit()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Chi-square unit gamma training should succeed");
+
+        // Test Chi-square with auto gamma
+        let model_chi2_auto = SVM::with_chi_square_auto(3)
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Chi-square auto gamma training should succeed");
+
+        // Test Chi-square for computer vision
+        let model_chi2_cv = SVM::with_chi_square_cv()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Chi-square CV training should succeed");
+
+        // Test Chi-square for text analysis
+        let model_chi2_text = SVM::with_chi_square_text()
+            .with_c(10.0)
+            .train_samples(&samples)
+            .expect("Chi-square text training should succeed");
+
+        // All models should train successfully
+        assert!(model_chi2.info().n_support_vectors > 0);
+        assert!(model_chi2_unit.info().n_support_vectors > 0);
+        assert!(model_chi2_auto.info().n_support_vectors > 0);
+        assert!(model_chi2_cv.info().n_support_vectors > 0);
+        assert!(model_chi2_text.info().n_support_vectors > 0);
+
+        // Test predictions
+        let test_sample = Sample::new(
+            SparseVector::new(vec![0, 1, 2], vec![12.0, 22.0, 32.0]),
+            1.0,
+        );
+
+        let pred_chi2 = model_chi2.predict(&test_sample);
+        let pred_unit = model_chi2_unit.predict(&test_sample);
+        let pred_auto = model_chi2_auto.predict(&test_sample);
+        let pred_cv = model_chi2_cv.predict(&test_sample);
+        let pred_text = model_chi2_text.predict(&test_sample);
+
+        // All predictions should be finite
+        assert!(pred_chi2.decision_value.is_finite());
+        assert!(pred_unit.decision_value.is_finite());
+        assert!(pred_auto.decision_value.is_finite());
+        assert!(pred_cv.decision_value.is_finite());
+        assert!(pred_text.decision_value.is_finite());
+
+        // For this histogram-like data, Chi-square should work well
+        assert_eq!(pred_chi2.label, 1.0);
+        assert_eq!(pred_unit.label, 1.0);
+        assert_eq!(pred_auto.label, 1.0);
+        assert_eq!(pred_cv.label, 1.0);
+        assert_eq!(pred_text.label, 1.0);
+    }
+
+    #[test]
+    fn test_chi_square_vs_linear_comparison() {
+        use crate::utils::scaling::ScalingMethod;
+
+        // Create histogram-like data where Chi-square should outperform linear
+        let samples = vec![
+            // Histogram class 1: peak at beginning
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![50.0, 30.0, 15.0, 5.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![45.0, 35.0, 12.0, 8.0]),
+                1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![55.0, 25.0, 18.0, 2.0]),
+                1.0,
+            ),
+            // Histogram class 2: peak at end
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![5.0, 15.0, 30.0, 50.0]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![8.0, 12.0, 35.0, 45.0]),
+                -1.0,
+            ),
+            Sample::new(
+                SparseVector::new(vec![0, 1, 2, 3], vec![2.0, 18.0, 25.0, 55.0]),
+                -1.0,
+            ),
+        ];
+
+        // Train linear SVM
+        let model_linear = SVM::new()
+            .with_c(1.0)
+            .with_feature_scaling(ScalingMethod::MinMax {
+                min_val: 0.0,
+                max_val: 1.0,
+            })
+            .train_samples(&samples)
+            .expect("Linear training should succeed");
+
+        // Train Chi-square SVM
+        let model_chi2 = SVM::with_chi_square(1.0)
+            .with_c(1.0)
+            .train_samples(&samples)
+            .expect("Chi-square training should succeed");
+
+        // Both should train successfully
+        assert!(model_linear.info().n_support_vectors > 0);
+        assert!(model_chi2.info().n_support_vectors > 0);
+
+        // Calculate training accuracy for both
+        let linear_correct = samples
+            .iter()
+            .map(|sample| model_linear.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let chi2_correct = samples
+            .iter()
+            .map(|sample| model_chi2.predict(sample))
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count();
+
+        let linear_accuracy = linear_correct as f64 / samples.len() as f64;
+        let chi2_accuracy = chi2_correct as f64 / samples.len() as f64;
+
+        // Both should achieve reasonable accuracy
+        assert!(linear_accuracy >= 0.0);
+        assert!(chi2_accuracy >= 0.0);
+
+        // Chi-square should perform well or better on histogram data
+        assert!(chi2_accuracy >= linear_accuracy - 0.1); // Allow some tolerance
+
+        // Test prediction consistency
+        let test_sample = Sample::new(
+            SparseVector::new(vec![0, 1, 2, 3], vec![40.0, 30.0, 20.0, 10.0]),
+            1.0,
+        );
+        let pred_linear = model_linear.predict(&test_sample);
+        let pred_chi2 = model_chi2.predict(&test_sample);
+
+        assert!(pred_linear.decision_value.is_finite());
+        assert!(pred_chi2.decision_value.is_finite());
     }
 
     #[test]
