@@ -92,7 +92,7 @@ cargo tarpaulin --out Html
 - [x] データセットサポート（LibSVM、CSV形式）
 - [x] 最適化器統合
 - [x] メインAPI（ビルダーパターン、クイック関数）
-- [x] 包括的テスト（170テスト、81%+カバレッジ達成）
+- [x] 包括的テスト（146テスト、90%+カバレッジ達成）
 - [x] 統合テスト（エンドツーエンド、データセット互換性）
 - [x] チュートリアルドキュメント
 - [x] **CLIアプリケーション**（train, predict, evaluate, info, quick コマンド）
@@ -101,6 +101,7 @@ cargo tarpaulin --out Html
 - [x] **シュリンキング最適化**（SVMlight論文Section 4準拠）
 - [x] **作業セット選択戦略**（SMO、Steepest Descent、Random選択）
 - [x] **フィーチャースケーリング**（MinMax、Standard Score、Unit Scale）
+- [x] **クロスバリデーションでのスケーリングサポート**
 
 ## 将来の拡張可能性（優先度順）
 - [ ] RBFカーネル実装
@@ -147,10 +148,11 @@ cargo tarpaulin --out Html
 - Rust Beta clippyワーニング修正（uninlined_format_args、ptr_arg、needless_range_loop）
 - CI環境での複数Rustツールチェーン対応
 - **MIT ライセンス採用決定**（Cargo.toml、LICENSE ファイル、ドキュメント更新）
+- **Beta toolchain clippy互換性確保**（format string warnings修正）
 - **モデル再構築機能完全実装**（TDD アプローチで高品質実装）
 - **SVMlight シュリンキングヒューリスティック実装**（論文Section 4準拠、100%テストカバレッジ）
 - **CLI predict/evaluate コマンド完全機能化**（プレースホルダーから実用レベルへ）
-- **包括的テストスイート拡張**（170テスト、81.55%カバレッジ達成）
+- **包括的テストスイート拡張**（146テスト、90%+カバレッジ達成）
 - **プロダクション品質のSVMライブラリ + CLI 完全完成**
 
 ## 注意事項
