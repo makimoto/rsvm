@@ -22,7 +22,9 @@
 //! # }
 //! ```
 
-use crate::core::{Dataset, OptimizerConfig, Prediction, Result, SVMError, SVMModel, Sample};
+use crate::core::{
+    Dataset, OptimizerConfig, Prediction, Result, SVMError, SVMModel, Sample, WorkingSetStrategy,
+};
 use crate::data::{CSVDataset, LibSVMDataset};
 use crate::kernel::{Kernel, LinearKernel};
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
@@ -100,6 +102,16 @@ impl<K: Kernel> SVM<K> {
     /// Default is 100 iterations (h parameter in the paper).
     pub fn with_shrinking_iterations(mut self, iterations: usize) -> Self {
         self.config.shrinking_iterations = iterations;
+        self
+    }
+
+    /// Set working set selection strategy
+    ///
+    /// - `SMOHeuristic`: Uses max |E_i - E_j| criterion (default, fast)
+    /// - `SteepestDescent`: Uses maximum KKT violation (SVMlight paper style, more rigorous)
+    /// - `Random`: Random selection (for debugging/comparison)
+    pub fn with_working_set_strategy(mut self, strategy: WorkingSetStrategy) -> Self {
+        self.config.working_set_strategy = strategy;
         self
     }
 
@@ -345,6 +357,16 @@ pub mod quick {
 
     /// Cross-validation helper (simple random split)
     pub fn simple_validation<D: Dataset>(dataset: &D, train_ratio: f64, c: f64) -> Result<f64> {
+        simple_validation_with_strategy(dataset, train_ratio, c, WorkingSetStrategy::SMOHeuristic)
+    }
+
+    /// Cross-validation helper with configurable working set strategy
+    pub fn simple_validation_with_strategy<D: Dataset>(
+        dataset: &D,
+        train_ratio: f64,
+        c: f64,
+        strategy: WorkingSetStrategy,
+    ) -> Result<f64> {
         if train_ratio <= 0.0 || train_ratio >= 1.0 {
             return Err(SVMError::InvalidParameter(format!(
                 "Train ratio must be between 0 and 1, got: {train_ratio}"
@@ -358,7 +380,10 @@ pub mod quick {
         let train_samples: Vec<Sample> = (0..train_size).map(|i| dataset.get_sample(i)).collect();
         let test_samples: Vec<Sample> = (train_size..n).map(|i| dataset.get_sample(i)).collect();
 
-        let model = SVM::new().with_c(c).train_samples(&train_samples)?;
+        let model = SVM::new()
+            .with_c(c)
+            .with_working_set_strategy(strategy)
+            .train_samples(&train_samples)?;
 
         let correct = test_samples
             .iter()
@@ -622,6 +647,58 @@ mod tests {
         let model = svm
             .train_samples(&samples)
             .expect("Training should succeed");
+        assert!(model.info().n_support_vectors > 0);
+    }
+
+    #[test]
+    fn test_svm_with_working_set_strategy() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.8]), -1.0),
+        ];
+
+        // Test SMO heuristic
+        let model_smo = SVM::new()
+            .with_working_set_strategy(WorkingSetStrategy::SMOHeuristic)
+            .train_samples(&samples)
+            .expect("Training with SMO heuristic should succeed");
+        assert!(model_smo.info().n_support_vectors > 0);
+
+        // Test steepest descent
+        let model_steepest = SVM::new()
+            .with_working_set_strategy(WorkingSetStrategy::SteepestDescent)
+            .train_samples(&samples)
+            .expect("Training with steepest descent should succeed");
+        assert!(model_steepest.info().n_support_vectors > 0);
+
+        // Test random selection
+        let model_random = SVM::new()
+            .with_working_set_strategy(WorkingSetStrategy::Random)
+            .train_samples(&samples)
+            .expect("Training with random selection should succeed");
+        assert!(model_random.info().n_support_vectors > 0);
+    }
+
+    #[test]
+    fn test_svm_builder_pattern_full_configuration() {
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+        ];
+
+        let model = SVM::new()
+            .with_c(0.5)
+            .with_epsilon(0.01)
+            .with_max_iterations(50)
+            .with_cache_size(50_000_000)
+            .with_shrinking(true)
+            .with_shrinking_iterations(10)
+            .with_working_set_strategy(WorkingSetStrategy::SteepestDescent)
+            .train_samples(&samples)
+            .expect("Training with full configuration should succeed");
+
         assert!(model.info().n_support_vectors > 0);
     }
 

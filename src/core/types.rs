@@ -118,6 +118,23 @@ pub struct OptimizationResult {
     pub objective_value: f64,
 }
 
+/// Working set selection strategy
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WorkingSetStrategy {
+    /// SMO heuristic (current implementation) - max |E_i - E_j|
+    SMOHeuristic,
+    /// Steepest descent (SVMlight paper) - maximum violation of KKT conditions
+    SteepestDescent,
+    /// Random selection (for comparison/debugging)
+    Random,
+}
+
+impl Default for WorkingSetStrategy {
+    fn default() -> Self {
+        Self::SMOHeuristic
+    }
+}
+
 /// Configuration for optimizer
 #[derive(Debug, Clone)]
 pub struct OptimizerConfig {
@@ -135,6 +152,8 @@ pub struct OptimizerConfig {
     pub shrinking: bool,
     /// Number of iterations between shrinking (h in the paper)
     pub shrinking_iterations: usize,
+    /// Working set selection strategy
+    pub working_set_strategy: WorkingSetStrategy,
 }
 
 impl Default for OptimizerConfig {
@@ -147,6 +166,7 @@ impl Default for OptimizerConfig {
             cache_size: 100_000_000, // 100MB
             shrinking: true,         // Enable shrinking by default for better performance
             shrinking_iterations: 100,
+            working_set_strategy: WorkingSetStrategy::default(),
         }
     }
 }
@@ -213,6 +233,33 @@ mod tests {
         assert_eq!(config.cache_size, 100_000_000);
         assert!(config.shrinking);
         assert_eq!(config.shrinking_iterations, 100);
+        assert_eq!(
+            config.working_set_strategy,
+            WorkingSetStrategy::SMOHeuristic
+        );
+    }
+
+    #[test]
+    fn test_working_set_strategy() {
+        assert_eq!(
+            WorkingSetStrategy::default(),
+            WorkingSetStrategy::SMOHeuristic
+        );
+
+        let strategies = [
+            WorkingSetStrategy::SMOHeuristic,
+            WorkingSetStrategy::SteepestDescent,
+            WorkingSetStrategy::Random,
+        ];
+
+        // Test that all strategies are different
+        for (i, &strategy1) in strategies.iter().enumerate() {
+            for (j, &strategy2) in strategies.iter().enumerate() {
+                if i != j {
+                    assert_ne!(strategy1, strategy2);
+                }
+            }
+        }
     }
 
     #[test]

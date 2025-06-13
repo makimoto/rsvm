@@ -4,7 +4,9 @@
 //! focusing on the 2-variable optimization problem (q=2 in the paper).
 
 use crate::cache::KernelCache;
-use crate::core::{OptimizationResult, OptimizerConfig, Result, SVMError, Sample};
+use crate::core::{
+    OptimizationResult, OptimizerConfig, Result, SVMError, Sample, WorkingSetStrategy,
+};
 use crate::kernel::Kernel;
 use crate::solver::shrinking::ShrinkingStrategy;
 use std::sync::Arc;
@@ -119,7 +121,13 @@ impl<K: Kernel> SMOSolver<K> {
             if examine_all {
                 // Examine all active samples
                 for &i in &active_set {
-                    if self.examine_example(i, samples, &mut alpha, &mut error_cache)? {
+                    if self.examine_example(
+                        i,
+                        samples,
+                        &mut alpha,
+                        &mut error_cache,
+                        &active_set,
+                    )? {
                         num_changed += 1;
                     }
                 }
@@ -128,7 +136,13 @@ impl<K: Kernel> SMOSolver<K> {
                 for &i in &active_set {
                     if alpha[i] > 0.0
                         && alpha[i] < self.config.c
-                        && self.examine_example(i, samples, &mut alpha, &mut error_cache)?
+                        && self.examine_example(
+                            i,
+                            samples,
+                            &mut alpha,
+                            &mut error_cache,
+                            &active_set,
+                        )?
                     {
                         num_changed += 1;
                     }
@@ -224,6 +238,7 @@ impl<K: Kernel> SMOSolver<K> {
         samples: &[Sample],
         alpha: &mut [f64],
         error_cache: &mut [f64],
+        active_set: &[usize],
     ) -> Result<bool> {
         let y_i = samples[i].label;
         let alpha_i = alpha[i];
@@ -239,9 +254,14 @@ impl<K: Kernel> SMOSolver<K> {
             || (r_i > self.config.epsilon && alpha_i > 0.0)
         {
             // Try to find a second variable to optimize with
-            if let Some(j) =
-                self.select_second_variable(i, e_i, &alpha[..], &error_cache[..], samples)?
-            {
+            if let Some(j) = self.select_second_variable(
+                i,
+                e_i,
+                &alpha[..],
+                &error_cache[..],
+                samples,
+                &active_set,
+            )? {
                 if self.take_step(i, j, samples, alpha, error_cache)? {
                     return Ok(true);
                 }
@@ -251,24 +271,50 @@ impl<K: Kernel> SMOSolver<K> {
         Ok(false)
     }
 
-    /// Select second variable using maximum |E_i - E_j| heuristic
+    /// Select second variable using configured strategy
     fn select_second_variable(
         &self,
         i: usize,
         e_i: f64,
-        _alpha: &[f64],
+        alpha: &[f64],
         error_cache: &[f64],
-        _samples: &[Sample],
+        samples: &[Sample],
+        active_set: &[usize],
+    ) -> Result<Option<usize>> {
+        match self.config.working_set_strategy {
+            WorkingSetStrategy::SMOHeuristic => {
+                self.select_second_variable_smo_heuristic(i, e_i, error_cache, active_set)
+            }
+            WorkingSetStrategy::SteepestDescent => self.select_second_variable_steepest_descent(
+                i,
+                e_i,
+                alpha,
+                error_cache,
+                samples,
+                active_set,
+            ),
+            WorkingSetStrategy::Random => self.select_second_variable_random(i, active_set),
+        }
+    }
+
+    /// Select second variable using SMO heuristic: maximum |E_i - E_j|
+    fn select_second_variable_smo_heuristic(
+        &self,
+        i: usize,
+        e_i: f64,
+        error_cache: &[f64],
+        active_set: &[usize],
     ) -> Result<Option<usize>> {
         let mut best_j = None;
         let mut max_diff = 0.0;
 
-        // Look for the variable that maximizes |E_i - E_j|
-        for (j, &e_j) in error_cache.iter().enumerate() {
+        // Look for the variable that maximizes |E_i - E_j| among active variables
+        for &j in active_set {
             if j == i {
                 continue;
             }
 
+            let e_j = error_cache[j];
             let diff = (e_i - e_j).abs();
 
             if diff > max_diff {
@@ -278,6 +324,76 @@ impl<K: Kernel> SMOSolver<K> {
         }
 
         Ok(best_j)
+    }
+
+    /// Select second variable using steepest descent: maximum KKT violation
+    fn select_second_variable_steepest_descent(
+        &self,
+        i: usize,
+        _e_i: f64,
+        alpha: &[f64],
+        error_cache: &[f64],
+        samples: &[Sample],
+        active_set: &[usize],
+    ) -> Result<Option<usize>> {
+        let mut best_j = None;
+        let mut max_violation = 0.0;
+
+        // Find variable with maximum KKT violation among active variables
+        for &j in active_set {
+            if j == i {
+                continue;
+            }
+
+            let y_j = samples[j].label;
+            let e_j = error_cache[j];
+            let alpha_j = alpha[j];
+
+            // Calculate KKT violation: r_j = e_j * y_j
+            let r_j = e_j * y_j;
+
+            // KKT violation magnitude
+            let violation = if r_j < -self.config.epsilon && alpha_j < self.config.c {
+                (-r_j - self.config.epsilon).max(0.0)
+            } else if r_j > self.config.epsilon && alpha_j > 0.0 {
+                (r_j - self.config.epsilon).max(0.0)
+            } else {
+                0.0
+            };
+
+            if violation > max_violation {
+                max_violation = violation;
+                best_j = Some(j);
+            }
+        }
+
+        Ok(best_j)
+    }
+
+    /// Select second variable randomly
+    fn select_second_variable_random(
+        &self,
+        i: usize,
+        active_set: &[usize],
+    ) -> Result<Option<usize>> {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        // Simple deterministic "random" selection based on iteration count
+        // In a real implementation, you might use a proper PRNG
+        let mut hasher = DefaultHasher::new();
+        i.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        let available_indices: Vec<usize> =
+            active_set.iter().cloned().filter(|&j| j != i).collect();
+
+        if available_indices.is_empty() {
+            Ok(None)
+        } else {
+            let idx = (hash as usize) % available_indices.len();
+            Ok(Some(available_indices[idx]))
+        }
     }
 
     /// Perform the actual optimization step for variables i and j
@@ -893,5 +1009,127 @@ mod tests {
             result_no_shrinking.objective_value,
             result_with_shrinking.objective_value
         );
+    }
+
+    #[test]
+    fn test_working_set_strategy_smo_heuristic() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.working_set_strategy = WorkingSetStrategy::SMOHeuristic;
+        config.max_iterations = 50;
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.8]), -1.0),
+        ];
+
+        let result = solver
+            .solve(&samples)
+            .expect("Should solve with SMO heuristic");
+        assert!(result.support_vectors.len() > 0);
+        assert!(result.iterations > 0);
+    }
+
+    #[test]
+    fn test_working_set_strategy_steepest_descent() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.working_set_strategy = WorkingSetStrategy::SteepestDescent;
+        config.max_iterations = 50;
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.8]), -1.0),
+        ];
+
+        let result = solver
+            .solve(&samples)
+            .expect("Should solve with steepest descent");
+        assert!(result.support_vectors.len() > 0);
+        assert!(result.iterations > 0);
+    }
+
+    #[test]
+    fn test_working_set_strategy_random() {
+        let kernel = Arc::new(LinearKernel::new());
+        let mut config = OptimizerConfig::default();
+        config.working_set_strategy = WorkingSetStrategy::Random;
+        config.max_iterations = 50;
+
+        let solver = SMOSolver::new(kernel, config);
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![1.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1.8]), -1.0),
+        ];
+
+        let result = solver
+            .solve(&samples)
+            .expect("Should solve with random selection");
+        assert!(result.support_vectors.len() > 0);
+        assert!(result.iterations > 0);
+    }
+
+    #[test]
+    fn test_working_set_strategies_comparison() {
+        let kernel = Arc::new(LinearKernel::new());
+
+        let strategies = [
+            WorkingSetStrategy::SMOHeuristic,
+            WorkingSetStrategy::SteepestDescent,
+            WorkingSetStrategy::Random,
+        ];
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![3.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-3.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.5]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.5]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.8]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-2.8]), -1.0),
+        ];
+
+        let mut results = Vec::new();
+
+        for &strategy in &strategies {
+            let mut config = OptimizerConfig::default();
+            config.working_set_strategy = strategy;
+            config.max_iterations = 100;
+
+            let solver = SMOSolver::new(kernel.clone(), config);
+            let result = solver.solve(&samples).expect("Should solve");
+            results.push(result);
+        }
+
+        // All strategies should converge to reasonable solutions
+        for result in &results {
+            assert!(result.support_vectors.len() > 0);
+            assert!(result.objective_value.is_finite());
+            assert!(result.objective_value >= 0.0);
+        }
+
+        // Objective values should be similar (within 10% of each other)
+        let obj_values: Vec<f64> = results.iter().map(|r| r.objective_value).collect();
+        let max_obj = obj_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let min_obj = obj_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+
+        if max_obj > 0.0 {
+            let relative_diff = (max_obj - min_obj) / max_obj;
+            assert!(
+                relative_diff < 0.1,
+                "Objective values should be similar across strategies: {:?}",
+                obj_values
+            );
+        }
     }
 }

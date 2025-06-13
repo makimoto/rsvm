@@ -3,11 +3,11 @@
 //! A command-line interface for training, evaluating, and using SVM models
 //! with LibSVM and CSV data formats.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{error, info, warn};
 use rsvm::api::{quick, SVM};
-use rsvm::core::Result;
+use rsvm::core::{Result, WorkingSetStrategy};
 use rsvm::persistence::SerializableModel;
 use rsvm::{CSVDataset, Dataset, LibSVMDataset};
 use std::path::{Path, PathBuf};
@@ -74,6 +74,33 @@ struct TrainArgs {
     /// Kernel cache size in MB
     #[arg(long, default_value = "100")]
     cache_size: usize,
+
+    /// Working set selection strategy
+    #[arg(long, default_value = "smo-heuristic")]
+    working_set_strategy: CliWorkingSetStrategy,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum CliWorkingSetStrategy {
+    /// SMO heuristic: max |E_i - E_j| (fast, default)
+    #[value(name = "smo-heuristic")]
+    SMOHeuristic,
+    /// Steepest descent: max KKT violation (SVMlight style, more rigorous)
+    #[value(name = "steepest-descent")]
+    SteepestDescent,
+    /// Random selection (for debugging/comparison)
+    #[value(name = "random")]
+    Random,
+}
+
+impl From<CliWorkingSetStrategy> for WorkingSetStrategy {
+    fn from(cli_strategy: CliWorkingSetStrategy) -> Self {
+        match cli_strategy {
+            CliWorkingSetStrategy::SMOHeuristic => WorkingSetStrategy::SMOHeuristic,
+            CliWorkingSetStrategy::SteepestDescent => WorkingSetStrategy::SteepestDescent,
+            CliWorkingSetStrategy::Random => WorkingSetStrategy::Random,
+        }
+    }
 }
 
 #[derive(Args)]
@@ -152,6 +179,9 @@ enum QuickOperation {
         /// Regularization parameter C
         #[arg(short = 'C', long, default_value = "1.0")]
         c: f64,
+        /// Working set selection strategy
+        #[arg(long, default_value = "smo-heuristic")]
+        working_set_strategy: CliWorkingSetStrategy,
     },
 }
 
@@ -236,6 +266,7 @@ fn train_with_dataset<D: Dataset>(args: &TrainArgs, dataset: D) -> Result<()> {
         .with_epsilon(args.epsilon)
         .with_max_iterations(args.max_iterations)
         .with_cache_size(args.cache_size * 1024 * 1024) // Convert MB to bytes
+        .with_working_set_strategy(args.working_set_strategy.clone().into())
         .train(&dataset)?;
 
     info!("Training completed successfully");
@@ -457,18 +488,24 @@ fn quick_command(args: QuickArgs) -> Result<()> {
 
             Ok(())
         }
-        QuickOperation::Cv { data, ratio, c } => {
+        QuickOperation::Cv {
+            data,
+            ratio,
+            c,
+            working_set_strategy,
+        } => {
             info!("Cross-validation on {data:?} with ratio {ratio}");
 
             let format = detect_format(&data);
+            let strategy = working_set_strategy.clone().into();
             let accuracy = match format.as_str() {
                 "libsvm" => {
                     let dataset = LibSVMDataset::from_file(&data)?;
-                    quick::simple_validation(&dataset, ratio, c)?
+                    quick::simple_validation_with_strategy(&dataset, ratio, c, strategy)?
                 }
                 "csv" => {
                     let dataset = CSVDataset::from_file(&data)?;
-                    quick::simple_validation(&dataset, ratio, c)?
+                    quick::simple_validation_with_strategy(&dataset, ratio, c, strategy)?
                 }
                 _ => {
                     return Err(rsvm::core::SVMError::InvalidParameter(format!(
@@ -481,6 +518,7 @@ fn quick_command(args: QuickArgs) -> Result<()> {
             println!("Data file: {data:?}");
             println!("Train/test ratio: {ratio:.1}/{:.1}", 1.0 - ratio);
             println!("C parameter: {c}");
+            println!("Working set strategy: {:?}", strategy);
             println!("CV accuracy: {:.2}%", accuracy * 100.0);
 
             Ok(())
