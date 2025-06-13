@@ -28,12 +28,14 @@ use crate::core::{
 use crate::data::{CSVDataset, LibSVMDataset};
 use crate::kernel::{Kernel, LinearKernel};
 use crate::optimizer::{SVMOptimizer, TrainedSVM};
+use crate::utils::scaling::{ScalingMethod, ScalingParams};
 use std::path::Path;
 
 /// High-level SVM interface with builder pattern
 pub struct SVM<K: Kernel = LinearKernel> {
     kernel: K,
     config: OptimizerConfig,
+    scaling_method: Option<ScalingMethod>,
 }
 
 impl SVM<LinearKernel> {
@@ -42,6 +44,7 @@ impl SVM<LinearKernel> {
         Self {
             kernel: LinearKernel::new(),
             config: OptimizerConfig::default(),
+            scaling_method: None,
         }
     }
 }
@@ -58,6 +61,7 @@ impl<K: Kernel> SVM<K> {
         Self {
             kernel,
             config: OptimizerConfig::default(),
+            scaling_method: None,
         }
     }
 
@@ -115,18 +119,44 @@ impl<K: Kernel> SVM<K> {
         self
     }
 
+    /// Enable automatic feature scaling
+    ///
+    /// Features will be scaled using the specified method before training.
+    /// Scaling parameters are computed from training data and stored for
+    /// consistent transformation of prediction data.
+    ///
+    /// # Arguments
+    /// * `method` - Scaling method to use:
+    ///   - `MinMax { min_val, max_val }`: Scale to specified range (default: [-1, 1])
+    ///   - `StandardScore`: Z-score normalization (mean=0, std=1)
+    ///   - `UnitScale`: Scale by maximum absolute value
+    pub fn with_feature_scaling(mut self, method: ScalingMethod) -> Self {
+        self.scaling_method = Some(method);
+        self
+    }
+
     /// Train on a dataset
     pub fn train<D: Dataset>(self, dataset: &D) -> Result<TrainedModel<K>> {
-        let optimizer = SVMOptimizer::new(self.kernel, self.config);
-        let model = optimizer.train(dataset)?;
-        Ok(TrainedModel { model })
+        let samples: Vec<Sample> = (0..dataset.len()).map(|i| dataset.get_sample(i)).collect();
+        self.train_samples(&samples)
     }
 
     /// Train on samples
     pub fn train_samples(self, samples: &[Sample]) -> Result<TrainedModel<K>> {
+        let (training_samples, scaling_params) = if let Some(method) = self.scaling_method {
+            let params = ScalingParams::fit(samples, method);
+            let scaled_samples = params.transform_samples(samples);
+            (scaled_samples, Some(params))
+        } else {
+            (samples.to_vec(), None)
+        };
+
         let optimizer = SVMOptimizer::new(self.kernel, self.config);
-        let model = optimizer.train_samples(samples)?;
-        Ok(TrainedModel { model })
+        let model = optimizer.train_samples(&training_samples)?;
+        Ok(TrainedModel {
+            model,
+            scaling_params,
+        })
     }
 
     /// Train from LibSVM format file
@@ -145,22 +175,47 @@ impl<K: Kernel> SVM<K> {
 /// Trained SVM model with high-level prediction interface
 pub struct TrainedModel<K: Kernel> {
     model: TrainedSVM<K>,
+    scaling_params: Option<ScalingParams>,
 }
 
 impl<K: Kernel> TrainedModel<K> {
     /// Create a TrainedModel from a TrainedSVM
     pub fn from_trained_svm(model: TrainedSVM<K>) -> Self {
-        Self { model }
+        Self {
+            model,
+            scaling_params: None,
+        }
+    }
+
+    /// Create a TrainedModel from a TrainedSVM with scaling parameters
+    pub fn from_trained_svm_with_scaling(
+        model: TrainedSVM<K>,
+        scaling_params: Option<ScalingParams>,
+    ) -> Self {
+        Self {
+            model,
+            scaling_params,
+        }
     }
 
     /// Predict a single sample
     pub fn predict(&self, sample: &Sample) -> Prediction {
-        self.model.predict(sample)
+        let scaled_sample = if let Some(ref params) = self.scaling_params {
+            params.transform_sample(sample)
+        } else {
+            sample.clone()
+        };
+        self.model.predict(&scaled_sample)
     }
 
     /// Predict multiple samples
     pub fn predict_batch(&self, samples: &[Sample]) -> Vec<Prediction> {
-        self.model.predict_batch(samples)
+        let scaled_samples = if let Some(ref params) = self.scaling_params {
+            params.transform_samples(samples)
+        } else {
+            samples.to_vec()
+        };
+        self.model.predict_batch(&scaled_samples)
     }
 
     /// Predict from dataset
@@ -700,6 +755,108 @@ mod tests {
             .expect("Training with full configuration should succeed");
 
         assert!(model.info().n_support_vectors > 0);
+    }
+
+    #[test]
+    fn test_svm_with_feature_scaling() {
+        use crate::utils::scaling::ScalingMethod;
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![100.0, 1000.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![200.0, 2000.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![150.0, 1500.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![50.0, 500.0]), -1.0),
+        ];
+
+        // Test MinMax scaling
+        let model_minmax = SVM::new()
+            .with_feature_scaling(ScalingMethod::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            })
+            .train_samples(&samples)
+            .expect("Training with MinMax scaling should succeed");
+
+        // Test StandardScore scaling
+        let model_std = SVM::new()
+            .with_feature_scaling(ScalingMethod::StandardScore)
+            .train_samples(&samples)
+            .expect("Training with StandardScore scaling should succeed");
+
+        // Test UnitScale scaling
+        let model_unit = SVM::new()
+            .with_feature_scaling(ScalingMethod::UnitScale)
+            .train_samples(&samples)
+            .expect("Training with UnitScale scaling should succeed");
+
+        // All models should train successfully
+        assert!(model_minmax.info().n_support_vectors > 0);
+        assert!(model_std.info().n_support_vectors > 0);
+        assert!(model_unit.info().n_support_vectors > 0);
+
+        // Test prediction with scaling (should work with raw unscaled data)
+        let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![125.0, 1250.0]), 1.0);
+
+        let pred_minmax = model_minmax.predict(&test_sample);
+        let pred_std = model_std.predict(&test_sample);
+        let pred_unit = model_unit.predict(&test_sample);
+
+        // Predictions should be finite and reasonable
+        assert!(pred_minmax.decision_value.is_finite());
+        assert!(pred_std.decision_value.is_finite());
+        assert!(pred_unit.decision_value.is_finite());
+    }
+
+    #[test]
+    fn test_scaling_preserves_accuracy() {
+        use crate::utils::scaling::ScalingMethod;
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1000.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-1000.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![800.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![-800.0]), -1.0),
+        ];
+
+        // Train without scaling
+        let model_unscaled = SVM::new()
+            .with_c(10.0) // Higher C for better convergence with large values
+            .train_samples(&samples)
+            .expect("Training without scaling should succeed");
+
+        // Train with scaling
+        let model_scaled = SVM::new()
+            .with_c(1.0) // Standard C with scaling
+            .with_feature_scaling(ScalingMethod::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            })
+            .train_samples(&samples)
+            .expect("Training with scaling should succeed");
+
+        // Both should achieve good accuracy on this simple linearly separable data
+        let accuracy_unscaled = model_unscaled
+            .predict_batch(&samples)
+            .iter()
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count() as f64
+            / samples.len() as f64;
+
+        let accuracy_scaled = model_scaled
+            .predict_batch(&samples)
+            .iter()
+            .zip(samples.iter())
+            .filter(|(pred, sample)| pred.label == sample.label)
+            .count() as f64
+            / samples.len() as f64;
+
+        // Both models should work, but scaling helps with numerical stability
+        assert!(accuracy_unscaled >= 0.5); // At least better than random
+        assert!(accuracy_scaled >= 0.8); // Should be good with scaling
+
+        // The scaled model should generally perform as well or better
+        assert!(accuracy_scaled >= accuracy_unscaled - 0.1);
     }
 
     #[test]

@@ -70,21 +70,24 @@ use rsvm::api::SVM;
 use rsvm::{Sample, SparseVector};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create training data
+    // Create training data with different scales
     let samples = vec![
-        Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 1.0]), 1.0),
-        Sample::new(SparseVector::new(vec![0, 1], vec![1.8, 1.1]), 1.0),
-        Sample::new(SparseVector::new(vec![0, 1], vec![-2.0, -1.0]), -1.0),
-        Sample::new(SparseVector::new(vec![0, 1], vec![-1.8, -1.1]), -1.0),
+        Sample::new(SparseVector::new(vec![0, 1], vec![200.0, 10.0]), 1.0),
+        Sample::new(SparseVector::new(vec![0, 1], vec![180.0, 11.0]), 1.0),
+        Sample::new(SparseVector::new(vec![0, 1], vec![-200.0, -10.0]), -1.0),
+        Sample::new(SparseVector::new(vec![0, 1], vec![-180.0, -11.0]), -1.0),
     ];
 
-    // Train the model
+    // Train the model with feature scaling
     let model = SVM::new()
         .with_c(1.0)
+        .with_feature_scaling(rsvm::utils::scaling::ScalingMethod::MinMax { 
+            min_val: -1.0, max_val: 1.0 
+        })
         .train_samples(&samples)?;
 
-    // Make a prediction
-    let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![1.5, 0.8]), 1.0);
+    // Make a prediction (no need to scale - done automatically)
+    let test_sample = Sample::new(SparseVector::new(vec![0, 1], vec![150.0, 8.0]), 1.0);
     let prediction = model.predict(&test_sample);
     
     println!("Predicted label: {}", prediction.label);
@@ -123,6 +126,10 @@ rsvm train --data training_data.csv --output my_model.json --format csv
 # Training with custom parameters
 rsvm train --data training_data.libsvm --output my_model.json \
     -C 10.0 --epsilon 0.0001 --max-iterations 2000
+
+# Training with feature scaling
+rsvm train --data training_data.libsvm --output my_model.json \
+    --feature-scaling minmax
 
 # Verbose training output
 rsvm train --data training_data.libsvm --output my_model.json --verbose
@@ -522,6 +529,24 @@ let model = SVM::new()
     .train_from_file("large_dataset.libsvm")?;
 ```
 
+### Feature Scaling Configuration
+
+```rust
+use rsvm::utils::scaling::ScalingMethod;
+
+// Combined configuration with scaling
+let model = SVM::new()
+    .with_c(10.0)
+    .with_feature_scaling(ScalingMethod::StandardScore)
+    .with_max_iterations(2000)
+    .train_from_file("raw_data.libsvm")?;
+
+// Custom range scaling
+let model = SVM::new()
+    .with_feature_scaling(ScalingMethod::MinMax { min_val: 0.0, max_val: 1.0 })
+    .train_from_file("data.libsvm")?;
+```
+
 ### Custom Kernels
 
 ```rust
@@ -599,25 +624,42 @@ fn iris_classification_example() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Performance Tips
 
-### 1. Data Preprocessing
+### 1. Feature Scaling
 
-**Note**: RSVM currently does not provide built-in scaling functions. Users must preprocess data externally.
+RSVM provides built-in feature scaling to improve numerical stability and convergence. Three scaling methods are available:
 
 ```rust
-// Example: User-implemented normalization function
-// (This is NOT part of the RSVM API - you need to implement this yourself)
-fn normalize_features_user_implementation(samples: &mut [Sample]) {
-    // Find min/max for each feature across all samples
-    // Apply min-max normalization: (x - min) / (max - min)
-    // Consider using external libraries like numpy/pandas via Python,
-    // or implement custom scaling logic in Rust
-}
+use rsvm::utils::scaling::ScalingMethod;
+
+// Min-Max scaling to [-1, 1] range (default)
+let model = SVM::new()
+    .with_feature_scaling(ScalingMethod::MinMax { min_val: -1.0, max_val: 1.0 })
+    .train_samples(&samples)?;
+
+// Standard score (Z-score) normalization
+let model = SVM::new()
+    .with_feature_scaling(ScalingMethod::StandardScore)
+    .train_samples(&samples)?;
+
+// Unit scaling by maximum absolute value
+let model = SVM::new()
+    .with_feature_scaling(ScalingMethod::UnitScale)
+    .train_samples(&samples)?;
 ```
 
-**Recommended approach**: Use external tools for data preprocessing:
-- Python: scikit-learn's `MinMaxScaler` or `StandardScaler`
-- R: `scale()` function
-- Manual preprocessing before loading into RSVM
+**CLI Usage**:
+```bash
+# Min-Max scaling
+rsvm train --data data.libsvm --output model.json --feature-scaling minmax
+
+# Standard score normalization  
+rsvm train --data data.libsvm --output model.json --feature-scaling standard
+
+# Unit scaling
+rsvm train --data data.libsvm --output model.json --feature-scaling unit
+```
+
+**Important**: When using scaling, the scaling parameters are automatically stored with the model and applied to prediction data. You don't need to manually scale test data.
 
 ### 2. Sparse Data
 

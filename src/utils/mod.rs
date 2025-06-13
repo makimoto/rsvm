@@ -2,6 +2,187 @@
 
 use crate::core::{Dataset, Sample};
 
+/// Feature scaling utilities  
+pub mod scaling {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Feature scaling methods
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum ScalingMethod {
+        /// Min-Max scaling to [min_val, max_val] range
+        MinMax { min_val: f64, max_val: f64 },
+        /// Standard (Z-score) normalization: (x - mean) / std
+        StandardScore,
+        /// Unit scaling: x / max(|x|)  
+        UnitScale,
+    }
+
+    impl Default for ScalingMethod {
+        fn default() -> Self {
+            Self::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            }
+        }
+    }
+
+    /// Feature scaling statistics for a dataset
+    #[derive(Debug, Clone)]
+    pub struct ScalingParams {
+        pub method: ScalingMethod,
+        pub feature_stats: HashMap<usize, FeatureStats>,
+    }
+
+    /// Statistics for a single feature
+    #[derive(Debug, Clone)]
+    pub struct FeatureStats {
+        pub min: f64,
+        pub max: f64,
+        pub mean: f64,
+        pub std: f64,
+        pub count: usize,
+    }
+
+    impl ScalingParams {
+        /// Compute scaling parameters from training data
+        pub fn fit(samples: &[Sample], method: ScalingMethod) -> Self {
+            let mut feature_stats = HashMap::new();
+
+            // Collect all feature values
+            let mut feature_values: HashMap<usize, Vec<f64>> = HashMap::new();
+
+            for sample in samples {
+                for (&feature_idx, &value) in sample
+                    .features
+                    .indices
+                    .iter()
+                    .zip(sample.features.values.iter())
+                {
+                    feature_values
+                        .entry(feature_idx)
+                        .or_insert_with(Vec::new)
+                        .push(value);
+                }
+            }
+
+            // Calculate statistics for each feature
+            for (feature_idx, values) in feature_values {
+                if values.is_empty() {
+                    continue;
+                }
+
+                let min = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+                let max = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+                let mean = values.iter().sum::<f64>() / values.len() as f64;
+
+                let variance = if values.len() > 1 {
+                    values.iter().map(|&x| (x - mean).powi(2)).sum::<f64>()
+                        / (values.len() - 1) as f64
+                } else {
+                    0.0
+                };
+                let std = variance.sqrt();
+
+                feature_stats.insert(
+                    feature_idx,
+                    FeatureStats {
+                        min,
+                        max,
+                        mean,
+                        std,
+                        count: values.len(),
+                    },
+                );
+            }
+
+            Self {
+                method,
+                feature_stats,
+            }
+        }
+
+        /// Transform a single sample using fitted parameters
+        pub fn transform_sample(&self, sample: &Sample) -> Sample {
+            let mut scaled_values = Vec::new();
+            let mut scaled_indices = Vec::new();
+
+            for (&feature_idx, &value) in sample
+                .features
+                .indices
+                .iter()
+                .zip(sample.features.values.iter())
+            {
+                if let Some(stats) = self.feature_stats.get(&feature_idx) {
+                    let scaled_value = self.scale_value(value, stats);
+
+                    // Keep all values - let SparseVector handle near-zero filtering
+                    scaled_indices.push(feature_idx);
+                    scaled_values.push(scaled_value);
+                } else {
+                    // Feature not seen in training data - keep original value
+                    scaled_indices.push(feature_idx);
+                    scaled_values.push(value);
+                }
+            }
+
+            Sample::new(
+                crate::core::SparseVector::new(scaled_indices, scaled_values),
+                sample.label,
+            )
+        }
+
+        /// Transform multiple samples
+        pub fn transform_samples(&self, samples: &[Sample]) -> Vec<Sample> {
+            samples
+                .iter()
+                .map(|sample| self.transform_sample(sample))
+                .collect()
+        }
+
+        /// Scale a single value using the appropriate method
+        fn scale_value(&self, value: f64, stats: &FeatureStats) -> f64 {
+            match self.method {
+                ScalingMethod::MinMax { min_val, max_val } => {
+                    if (stats.max - stats.min).abs() < 1e-12 {
+                        // Constant feature
+                        (min_val + max_val) / 2.0
+                    } else {
+                        let normalized = (value - stats.min) / (stats.max - stats.min);
+                        min_val + normalized * (max_val - min_val)
+                    }
+                }
+                ScalingMethod::StandardScore => {
+                    if stats.std < 1e-12 {
+                        // Constant feature
+                        0.0
+                    } else {
+                        (value - stats.mean) / stats.std
+                    }
+                }
+                ScalingMethod::UnitScale => {
+                    let max_abs = stats.max.abs().max(stats.min.abs());
+                    if max_abs < 1e-12 {
+                        0.0
+                    } else {
+                        value / max_abs
+                    }
+                }
+            }
+        }
+    }
+
+    /// Convenience function: fit and transform in one step
+    pub fn fit_transform(
+        samples: &[Sample],
+        method: ScalingMethod,
+    ) -> (Vec<Sample>, ScalingParams) {
+        let params = ScalingParams::fit(samples, method);
+        let transformed = params.transform_samples(samples);
+        (transformed, params)
+    }
+}
+
 /// Validation and preprocessing utilities
 pub mod validation {
     use super::*;
@@ -409,5 +590,169 @@ mod tests {
         let recommended = memory::recommend_cache_size(100, 100); // 100MB available
         assert!(recommended > 0);
         assert!(recommended <= 50 * 1024 * 1024); // At most 50MB
+    }
+
+    #[test]
+    fn test_scaling_minmax() {
+        use crate::utils::scaling::{ScalingMethod, ScalingParams};
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 1], vec![1.0, 10.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![3.0, 20.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0, 1], vec![5.0, 30.0]), 1.0),
+        ];
+
+        let params = ScalingParams::fit(
+            &samples,
+            ScalingMethod::MinMax {
+                min_val: 0.0,
+                max_val: 1.0,
+            },
+        );
+        let transformed = params.transform_samples(&samples);
+
+        // Check first sample transformation
+        let first_transformed = &transformed[0];
+        assert_eq!(first_transformed.features.indices, vec![0, 1]);
+
+        // Feature 0: min=1, max=5, so 1.0 -> 0.0
+        assert!((first_transformed.features.values[0] - 0.0).abs() < 1e-10);
+        // Feature 1: min=10, max=30, so 10.0 -> 0.0
+        assert!((first_transformed.features.values[1] - 0.0).abs() < 1e-10);
+
+        // Check last sample transformation
+        let last_transformed = &transformed[2];
+        // Feature 0: 5.0 -> 1.0
+        assert!((last_transformed.features.values[0] - 1.0).abs() < 1e-10);
+        // Feature 1: 30.0 -> 1.0
+        assert!((last_transformed.features.values[1] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_scaling_standard_score() {
+        use crate::utils::scaling::{ScalingMethod, ScalingParams};
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![3.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![5.0]), 1.0),
+        ];
+
+        let params = ScalingParams::fit(&samples, ScalingMethod::StandardScore);
+        let transformed = params.transform_samples(&samples);
+
+        // Mean should be 3.0, std should be 2.0
+        // First value (1.0): (1-3)/2 = -1.0
+        let first_value = transformed[0].features.values[0];
+        assert!((first_value - (-1.0)).abs() < 1e-10);
+
+        // Second value (3.0): (3-3)/2 = 0.0
+        let second_value = transformed[1].features.values[0];
+        assert!(second_value.abs() < 1e-10); // Should be ~0
+
+        // Third value (5.0): (5-3)/2 = 1.0
+        let third_value = transformed[2].features.values[0];
+        assert!((third_value - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_scaling_unit_scale() {
+        use crate::utils::scaling::{ScalingMethod, ScalingParams};
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![-4.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![2.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![8.0]), 1.0),
+        ];
+
+        let params = ScalingParams::fit(&samples, ScalingMethod::UnitScale);
+        let transformed = params.transform_samples(&samples);
+
+        // Max absolute value is 8.0
+        // First: -4.0/8.0 = -0.5
+        assert!((transformed[0].features.values[0] - (-0.5)).abs() < 1e-10);
+        // Second: 2.0/8.0 = 0.25
+        assert!((transformed[1].features.values[0] - 0.25).abs() < 1e-10);
+        // Third: 8.0/8.0 = 1.0
+        assert!((transformed[2].features.values[0] - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_scaling_constant_feature() {
+        use crate::utils::scaling::{ScalingMethod, ScalingParams};
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![5.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![5.0]), -1.0),
+            Sample::new(SparseVector::new(vec![0], vec![5.0]), 1.0),
+        ];
+
+        // Test MinMax with constant feature
+        let params = ScalingParams::fit(
+            &samples,
+            ScalingMethod::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            },
+        );
+        let transformed = params.transform_samples(&samples);
+
+        // Constant feature should map to middle of range
+        for sample in &transformed {
+            assert!((sample.features.values[0] - 0.0).abs() < 1e-10);
+        }
+
+        // Test StandardScore with constant feature
+        let params_std = ScalingParams::fit(&samples, ScalingMethod::StandardScore);
+        let transformed_std = params_std.transform_samples(&samples);
+
+        // Constant feature should be filtered out (scaled to 0)
+        for sample in &transformed_std {
+            assert!(
+                sample.features.is_empty()
+                    || sample.features.values.iter().all(|&v| v.abs() < 1e-10)
+            );
+        }
+    }
+
+    #[test]
+    fn test_fit_transform_convenience() {
+        use crate::utils::scaling::{fit_transform, ScalingMethod};
+
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0], vec![1.0]), 1.0),
+            Sample::new(SparseVector::new(vec![0], vec![5.0]), -1.0),
+        ];
+
+        let (transformed, params) = fit_transform(&samples, ScalingMethod::default());
+
+        assert_eq!(transformed.len(), 2);
+        assert_eq!(params.feature_stats.len(), 1);
+        assert!(params.feature_stats.contains_key(&0));
+    }
+
+    #[test]
+    fn test_scaling_sparse_preservation() {
+        use crate::utils::scaling::{ScalingMethod, ScalingParams};
+
+        // Test that sparsity is preserved when possible
+        let samples = vec![
+            Sample::new(SparseVector::new(vec![0, 2], vec![1.0, 3.0]), 1.0), // Missing feature 1
+            Sample::new(SparseVector::new(vec![0, 1], vec![2.0, 5.0]), -1.0), // Missing feature 2
+        ];
+
+        let params = ScalingParams::fit(
+            &samples,
+            ScalingMethod::MinMax {
+                min_val: 0.0,
+                max_val: 1.0,
+            },
+        );
+        let transformed = params.transform_samples(&samples);
+
+        // First sample should still only have features 0 and 2
+        assert_eq!(transformed[0].features.indices, vec![0, 2]);
+        // Second sample should only have features 0 and 1
+        assert_eq!(transformed[1].features.indices, vec![0, 1]);
     }
 }

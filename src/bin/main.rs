@@ -9,6 +9,7 @@ use log::{error, info, warn};
 use rsvm::api::{quick, SVM};
 use rsvm::core::{Result, WorkingSetStrategy};
 use rsvm::persistence::SerializableModel;
+use rsvm::utils::scaling::ScalingMethod;
 use rsvm::{CSVDataset, Dataset, LibSVMDataset};
 use std::path::{Path, PathBuf};
 use std::process;
@@ -78,6 +79,10 @@ struct TrainArgs {
     /// Working set selection strategy
     #[arg(long, default_value = "smo-heuristic")]
     working_set_strategy: CliWorkingSetStrategy,
+
+    /// Feature scaling method
+    #[arg(long)]
+    feature_scaling: Option<CliScalingMethod>,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -91,6 +96,32 @@ enum CliWorkingSetStrategy {
     /// Random selection (for debugging/comparison)
     #[value(name = "random")]
     Random,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum CliScalingMethod {
+    /// Min-Max scaling to [-1, 1] range
+    #[value(name = "minmax")]
+    MinMax,
+    /// Standard score (Z-score) normalization
+    #[value(name = "standard")]
+    StandardScore,
+    /// Unit scaling by maximum absolute value
+    #[value(name = "unit")]
+    UnitScale,
+}
+
+impl From<CliScalingMethod> for ScalingMethod {
+    fn from(cli_method: CliScalingMethod) -> Self {
+        match cli_method {
+            CliScalingMethod::MinMax => ScalingMethod::MinMax {
+                min_val: -1.0,
+                max_val: 1.0,
+            },
+            CliScalingMethod::StandardScore => ScalingMethod::StandardScore,
+            CliScalingMethod::UnitScale => ScalingMethod::UnitScale,
+        }
+    }
 }
 
 impl From<CliWorkingSetStrategy> for WorkingSetStrategy {
@@ -261,13 +292,20 @@ fn train_with_dataset<D: Dataset>(args: &TrainArgs, dataset: D) -> Result<()> {
     }
 
     // Train model
-    let model = SVM::new()
+    let mut svm_builder = SVM::new()
         .with_c(args.c)
         .with_epsilon(args.epsilon)
         .with_max_iterations(args.max_iterations)
         .with_cache_size(args.cache_size * 1024 * 1024) // Convert MB to bytes
-        .with_working_set_strategy(args.working_set_strategy.clone().into())
-        .train(&dataset)?;
+        .with_working_set_strategy(args.working_set_strategy.clone().into());
+
+    // Add feature scaling if specified
+    if let Some(scaling_method) = &args.feature_scaling {
+        info!("Using feature scaling: {:?}", scaling_method);
+        svm_builder = svm_builder.with_feature_scaling(scaling_method.clone().into());
+    }
+
+    let model = svm_builder.train(&dataset)?;
 
     info!("Training completed successfully");
 
